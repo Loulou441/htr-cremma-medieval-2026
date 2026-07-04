@@ -4,14 +4,14 @@ Ce document explicite comment l'utilisation du NLP a ete applique au projet, san
 
 ## 1. Validation du data contract HTR
 
-- Schema JSON ajoute: `nlp_pipeline/htr_data_contract_schema.json`
+- Schema JSON ajoute: `nlp_pipeline/json_files/htr_data_contract_schema.json`
 - Validation schema + controles logiques (taille `char_confidences` == taille `text`):
   - `nlp_pipeline/htr_data_contract.py` -> `validate_contract()`
 - Commandes:
 
 ```bash
 python nlp_pipeline/nlp_cli.py validate --input data/contracts/htr_contract.json
-python nlp_pipeline/nlp_cli.py validate --input nlp/output
+python nlp_pipeline/nlp_cli.py validate --input data/nlp_output
 ```
 
 ## 2. EDA corpus HTR
@@ -32,7 +32,7 @@ Commandes:
 
 ```bash
 python nlp_pipeline/nlp_cli.py eda --input data/contracts/htr_contract.json --output reports/eda_day1.json
-python nlp_pipeline/nlp_cli.py eda --input nlp/output --output reports/eda_nlp_output.json
+python nlp_pipeline/nlp_cli.py eda --input data/nlp_output --output reports/eda_nlp_output.json
 ```
 
 ## 3. Strategie de triage confidence / needs_review
@@ -59,7 +59,7 @@ Commandes:
 
 ```bash
 python nlp_pipeline/nlp_cli.py review-queue --input data/contracts/htr_contract.json
-python nlp_pipeline/nlp_cli.py review-queue --input nlp/output
+python nlp_pipeline/nlp_cli.py review-queue --input data/nlp_output
 ```
 
 ## 4. Normalisation par regles
@@ -76,7 +76,7 @@ Normaliseur en classe independante, regles activables/desactivables (ablation po
 Code:
 
 - `nlp_pipeline/normalization_rules.py` -> `NormalizerConfig`, `MedievalFrenchNormalizer`
-- table par defaut: `nlp_pipeline/medieval_abbreviations.json`
+- table par defaut: `nlp_pipeline/json_files/medieval_abbreviations.json`
 
 Commandes:
 
@@ -86,6 +86,13 @@ python nlp_pipeline/nlp_cli.py normalize --csv-input data/input.csv --csv-output
 ```
 
 Note : la commande `normalize-contract` (qui applique le normaliseur a un data contract complet, par opposition a `normalize` sur du texte brut/CSV) calcule egalement, depuis cette mise a jour, le **CER pairwise** (`raw` vs `normalized_text`) ligne par ligne et en moyenne, exporte via `--cer-output` — meme principe que pour `correct` (section 6).
+
+```bash
+python nlp_pipeline/nlp_cli.py normalize-contract \
+  --input data/nlp_output \
+  --output-dir data/nlp_output_normalized \
+  --cer-output data/review/normalize_cer_report.json
+```
 
 ## 5. CER et tableau d'ablation
 
@@ -97,6 +104,14 @@ Ablation (avant/apres normalisation):
 
 ```bash
 python nlp_pipeline/nlp_cli.py ablation --csv-input data/reference_200.csv --reference-col reference --hypothesis-col text
+```
+
+Evaluation relative (sans verite terrain, comparaison entre variantes) :
+
+```bash
+python nlp_pipeline/nlp_cli.py relative-eval \
+  --csv-input data/review/relative_eval_sample.csv \
+  --variant-cols raw,text_normalized,corrected
 ```
 
 ## 6. Correction contextuelle guidee par confiance
@@ -119,7 +134,7 @@ Commandes:
 ```bash
 # MLM actif par defaut (CamemBERT) :
 python nlp_pipeline/nlp_cli.py correct --input data/contracts/htr_contract.json --output data/contracts/htr_contract.corrected.json --log-output data/review/correction_log.jsonl --cer-output data/review/correction_cer_report.json
-python nlp_pipeline/nlp_cli.py correct --input nlp/output --output-dir nlp/output_corrected --log-output data/review/correction_log.jsonl
+python nlp_pipeline/nlp_cli.py correct --input data/nlp_output --output-dir data/nlp_output_corrected --log-output data/review/correction_log.jsonl
 
 # Scorer heuristique de repli (sans transformers/torch) :
 python nlp_pipeline/nlp_cli.py correct --input data/contracts/htr_contract.json --output data/contracts/htr_contract.corrected.json --no-mlm
@@ -147,22 +162,46 @@ Commande:
 python nlp_pipeline/nlp_cli.py split --records data/documents_metadata.json --output-dir data/splits_nlp
 ```
 
-## 8. Tests automatiques
+## 8. Detection lexicale
 
-Nouveaux tests:
+Deux commandes complementaires, toutes deux implementees dans `normalization_rules.py` :
 
-- `tests/test_normalization_rules.py`
-- `tests/test_htr_data_contract.py`
+- `detect-normalization` : repere les tokens porteurs de marqueurs d'abreviation residuels et propose des expansions.
+- `lexical-check` : flague les tokens (normalises) absents du dictionnaire ancien francais fourni via `--dictionary`.
+
+Code:
+
+- `nlp_pipeline/normalization_rules.py` -> `detect_normalization_candidates()`, `find_lexical_errors()`
+
+Commandes:
+
+```bash
+python nlp_pipeline/nlp_cli.py detect-normalization --output-dir data/nlp_output --top-n 50
+python nlp_pipeline/nlp_cli.py lexical-check --dictionary data/dictionary/dictionnaire_ancien_francais.json --output-dir data/nlp_output --top-n 30
+```
+
+## 9. Tests automatiques
+
+Tests (`nlp_pipeline/tests/`):
+
+- `test_cer_utils.py` — CER, WER
+- `test_htr_data_contract.py` — validation de schema, EDA, triage
+- `test_nlp_cli.py` — CER pairwise moyen
+- `test_nlp_cli_defaults.py` — les chemins par defaut (`DEFAULT_SCHEMA`, `DEFAULT_ABBR`) pointent vers des fichiers reels
+- `test_normalization_rules.py` — regles de normalisation, detection d'abreviations, erreurs lexicales
+- `test_normalization_cer_regression.py` — non-regression du CER sur un echantillon de reference
 
 Lancer:
 
 ```bash
-pytest -q
+pytest nlp_pipeline/tests/ -q
 ```
 
-## 9. Dependances ajoutees
+## 10. Dependances ajoutees
 
 `requirements.txt`:
 
 - `jsonschema>=4.21`
 - `pytest>=8.0`
+- `transformers>=4.0`, `sentencepiece>=0.1.0` (CamemBERT MLM, section 6)
+- `Pillow>=10.0` (requis par `evaluate_model.py`)

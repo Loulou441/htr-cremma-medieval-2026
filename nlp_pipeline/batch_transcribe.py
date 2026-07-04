@@ -34,10 +34,7 @@ def build_data_contract(
     confidence_threshold: float = 0.9,
 ) -> dict:
     """Build an HTR data contract JSON from Kraken predictions.
-
-    Rapatrié depuis l'ancien app.py (supprimé du dépôt) pour que ce script de
-    transcription batch reste autonome : la structure produite doit rester
-    strictement conforme à nlp_pipeline/htr_data_contract_schema.json.
+    La structure produite doit rester strictement conforme à nlp_pipeline/json_files/htr_data_contract_schema.json.
     """
     doc_id = Path(image_filename).stem + "_" + datetime.now().strftime("%Y%m%d_%H%M%S")
     lines = []

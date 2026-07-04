@@ -29,8 +29,8 @@ from normalization_rules import (
 )
 
 
-DEFAULT_SCHEMA = str(Path(__file__).parent / "htr_data_contract_schema.json")
-DEFAULT_ABBR = str(Path(__file__).parent / "medieval_abbreviations.json")
+DEFAULT_SCHEMA = str(Path(__file__).parent / "json_files" / "htr_data_contract_schema.json")
+DEFAULT_ABBR = str(Path(__file__).parent / "json_files" / "medieval_abbreviations.json")
 DEFAULT_DICTIONARY = "data/dictionary/dictionnaire_ancien_francais.json"
 RUN_LOG_PATH = "data/review/nlp_cli_run_log.jsonl"
 
