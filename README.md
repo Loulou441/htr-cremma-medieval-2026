@@ -1,470 +1,312 @@
-# HTR CREMMA Medieval 2026 — Fine-tuning Kraken
+# HTR + NLP — Manuscrits médiévaux du XIIIe siècle
 
-Projet de **Reconnaissance Automatique d'Écriture Manuscrite (HTR)** sur le corpus CREMMA Medieval (ancien français + latin, XIIIe–XVe siècle). Fine-tuning du modèle `cremma-generic` avec Kraken 7.x sur GPU cloud (Kaggle / Colab).
+Projet en deux volets sur la reconnaissance et le traitement de manuscrits médiévaux
+(ancien français + latin, XIIIe siècle), réalisé dans le cadre du Mastère Data & IA
+d'HETIC :
 
-**Meilleur CER obtenu à ce jour : 26.3% (Run 4 — Kaggle T4)**  
-**Objectif : CER < 15% (validation) → CER < 8% (excellence)**  
-**Modèles publiés : [legb/htr-cremma-medieval](https://huggingface.co/legb/htr-cremma-medieval)**
+- **Volet 1 — HTR** : fine-tuning d'un modèle de reconnaissance d'écriture manuscrite
+  (Kraken) sur 33 manuscrits CREMMA/HTRomance.
+- **Volet 2 — NLP** : normalisation, correction et structuration du texte produit par
+  ce modèle sur 16 manuscrits supplémentaires transcrits depuis Gallica/BnF.
+
+> **Ce README est un récapitulatif du projet dans son ensemble.** Le code de chaque
+> volet vit sur sa propre branche (voir [section 2](#2-où-trouver-le-code)) — `main`
+> ne contient pour l'instant que la documentation. Pour le détail complet de chaque
+> volet (commandes, code, résultats intégraux), suivez les liens vers les README de
+> branche : ils restent la source de vérité la plus à jour et la plus détaillée.
+
+**Équipe** : Ouazar, Djamal · Tessier, Manon · El Mortada, Hamza
+**Dépôt** : [github.com/Loulou441/htr-manuscrits-XIIIe-siecle](https://github.com/Loulou441/htr-manuscrits-XIIIe-siecle)
 
 ---
 
 ## Sommaire
 
-1. [Contexte et objectifs](#1-contexte-et-objectifs)
-2. [Corpus et données](#2-corpus-et-données)
-3. [Méthodologie](#3-méthodologie)
-4. [Résultats des expériences](#4-résultats-des-expériences)
-5. [Évaluation détaillée](#5-évaluation-détaillée)
-6. [Discussion et limitations](#6-discussion-et-limitations)
-7. [Reproductibilité](#7-reproductibilité)
-8. [Pipeline — utilisation](#8-pipeline--utilisation)
-9. [Structure du projet](#9-structure-du-projet)
-10. [Installation](#10-installation)
-11. [Infrastructure cloud](#11-infrastructure-cloud)
-12. [Références](#12-références)
+1. [Vue d'ensemble : de l'image au texte exploitable](#1-vue-densemble--de-limage-au-texte-exploitable)
+2. [Où trouver le code](#2-où-trouver-le-code)
+3. [Volet 1 — HTR : fine-tuning Kraken](#3-volet-1--htr--fine-tuning-kraken)
+4. [Volet 2 — NLP : normalisation, correction, structuration](#4-volet-2--nlp--normalisation-correction-structuration)
+5. [Résultats globaux du projet](#5-résultats-globaux-du-projet)
+6. [Limitations transversales](#6-limitations-transversales)
+7. [Prochaines étapes](#7-prochaines-étapes)
+8. [Installation rapide](#8-installation-rapide)
+9. [Références](#9-références)
+10. [Citation](#10-citation)
 
 ---
 
-## 1. Contexte et objectifs
+## 1. Vue d'ensemble : de l'image au texte exploitable
 
-Les modèles HTR génériques CREMMA atteignent ~95% de précision sur leurs corpus de validation propres, mais leur généralisation à un corpus non vu requiert un **fine-tuning spécialisé**. Deux limitations motivent ce travail :
+```
+Volet 1 — HTR (branche fine_tuning)
+════════════════════════════════════
+33 manuscrits CREMMA/HTRomance (XIIIe s., ancien français + latin, 22 858 lignes)
+        ↓  dataset.py (agrégation) → pre_traitement.py (deskew, CLAHE, filtres → mode L)
+        ↓  compile_arrow.py (filtrage zones bruit) → ketos train (fine-tuning Kraken)
+Modèle HTR fine-tuné — CER 26.3% (validation, Run 4)
+        │
+        │  appliqué à 16 NOUVEAUX manuscrits (Gallica/BnF, hors corpus d'entraînement)
+        ↓
+Volet 2 — NLP (branche nlp-pipeline-completed)
+════════════════════════════════════
+129 documents transcrits, 16 336 lignes → data contract JSON (texte + confiances + candidats)
+        ↓  validate → eda → review-queue (triage confiance)
+        ↓  normalisation par règles (Unicode, u/v, i/j, tilde, abréviations)
+        ↓  correction guidée par confiance (CamemBERT MLM)
+        ↓  détection lexicale + évaluation relative (CER pairwise) + split stratifié scellé
+Texte médiéval normalisé, corrigé, prêt pour NER/POS/graphe/TEI (phase suivante, non démarrée)
+```
 
-- **Mismatch de domaine** : les données d'entraînement originales de `cremma-generic` ne couvrent pas l'intégralité des manuscrits CREMMA Medieval (213 documents).
-- **Bruit dans les annotations ALTO** : les zones de bruit (notation musicale, lettrines, interlignaire) parasitent l'entraînement et représentent ~4.4% des lignes du corpus.
+Point important : **le Volet 2 ne retraite pas les 33 manuscrits d'entraînement du
+Volet 1**. Il traite 16 manuscrits *supplémentaires*, transcrits avec le modèle une
+fois celui-ci entraîné — deux corpus distincts, à ne pas confondre.
 
-Ce projet explore un pipeline complet : prétraitement adaptatif des images → compilation de données Arrow filtrées → fine-tuning GPU cloud → publication des modèles.
+---
 
-### Métriques cibles
+## 2. Où trouver le code
+
+| Volet | Branche | Contenu | README détaillé |
+|---|---|---|---|
+| HTR (entraînement, prétraitement, démo) | [`fine_tuning`](https://github.com/Loulou441/htr-manuscrits-XIIIe-siecle/tree/fine_tuning) | `src/`, `notebooks/`, `app.py` (démo Streamlit), `article/`, `docs/` | [README](https://github.com/Loulou441/htr-manuscrits-XIIIe-siecle/blob/fine_tuning/README.md) |
+| NLP (normalisation, correction, CLI) | [`nlp-pipeline-completed`](https://github.com/Loulou441/htr-manuscrits-XIIIe-siecle/tree/nlp-pipeline-completed) | `nlp_pipeline/`, `notebooks/`, `docs/` | [README](https://github.com/Loulou441/htr-manuscrits-XIIIe-siecle/blob/nlp-pipeline-completed/README.md) |
+
+D'autres branches de travail existent (`hamza/entrainement`, `manon`, `legb`,
+`nlp_comprehension_legb`, `bugfix/model_test_correction`,
+`feature/caracter_counter_fine_tuning`) — les deux ci-dessus sont les branches de
+référence, les plus abouties et documentées à ce jour pour chaque volet.
+
+---
+
+## 3. Volet 1 — HTR : fine-tuning Kraken
+
+*(Résumé — détail complet, méthodologie pas à pas, courbes d'apprentissage et
+diagnostic sur la [branche `fine_tuning`](https://github.com/Loulou441/htr-manuscrits-XIIIe-siecle/blob/fine_tuning/README.md))*
+
+### Objectif
+
+Les modèles HTR génériques CREMMA (~95% de précision sur leur propre corpus de
+validation) généralisent mal à un corpus non vu. Ce volet fine-tune `cremma-generic`
+avec Kraken 7.x sur un corpus élargi de 33 manuscrits du XIIIe siècle.
 
 | Niveau | CER | val_accuracy |
-|--------|:---:|:------------:|
-| Baseline (cremma-generic sans fine-tuning) | *à mesurer* | *à mesurer* |
-| Meilleure run actuelle (Run 4) | 26.3% | 73.7% |
+|---|:---:|:---:|
+| Meilleure run actuelle (Run 4) | **26.3%** | 73.7% |
 | Objectif validation | < 15% | > 85% |
 | Objectif excellence | < 8% | > 92% |
 
----
-
-## 2. Corpus et données
-
-### Description du corpus
+### Corpus d'entraînement
 
 | Indicateur | Valeur |
 |---|---|
-| Documents ALTO (train) | 213 fichiers |
-| Documents ALTO (dev) | 32 fichiers |
-| Documents ALTO (test) | 3 fichiers |
-| Lignes totales (train, toutes zones) | ~19 800 |
-| Lignes texte courant (train, filtré) | 18 769 |
-| Période couverte | XIIIe–XVe siècle |
-| Langues | Ancien français (`fro`), Latin (`lat`) |
-| Format | ALTO XML v4 + JPEG |
-| Licence | CC-BY 4.0 |
+| Manuscrits | 33 (XIIIe siècle, 4 corpus HTR-United agrégés) |
+| Langues | Ancien français et latin |
+| Lignes totales (brut) | 22 858 |
+| Lignes train (filtré, zones bruit exclues) | 18 769 |
+| Script dominant | Gothic Textualis (92.5% des lignes) |
+| Sources | CREMMA-Medieval, CREMMA-Medieval-LAT, HTRomance Medieval FR/LAT (HTR-United) |
 
-### Répartition des zones ALTO
+Un 34e manuscrit (BnF fr. 25516) sert uniquement de test de généralisation, hors
+corpus d'entraînement.
 
-```
-Total lignes corpus : ~48 278
-  MainZone (texte principal)   : 45 438  (94.1%)
-  MarginTextZone (marginalia)  :    732  ( 1.5%)
-  Zones bruit (Music/DropCap/Interlinear) : 2 108  ( 4.4%)
-```
-
-### Sources
-
-| Corpus | Langue | Dépôt |
-|--------|--------|-------|
-| CREMMA-Medieval | Ancien français | [HTR-United/cremma-medieval](https://github.com/HTR-United/cremma-medieval) |
-| CREMMA-Medieval-LAT | Latin | [HTR-United/CREMMA-Medieval-LAT](https://github.com/HTR-United/CREMMA-Medieval-LAT) |
-| HTRomance Medieval FR | Ancien français | [HTRomance-Project/medieval-french](https://github.com/HTRomance-Project/medieval-french) |
-| HTRomance Medieval LAT | Latin | [HTRomance-Project/medieval-latin](https://github.com/HTRomance-Project/medieval-latin) |
-
-### Splits
-
-| Split | Fichiers | Lignes (filtré) | SHA-256 Arrow |
-|-------|:--------:|:---------------:|---------------|
-| Train | 213 | 18 769 | `1bec767c9a87caa3...` |
-| Dev | 32 | 3 702 | `20ef530c68228695...` |
-| Test | 3 | *scellé* | *à compléter* |
-
----
-
-## 3. Méthodologie
-
-### Vue d'ensemble
+### Méthodologie
 
 ```
-Corpus CREMMA Medieval (ALTO XML + JPEG)
-    │
-    ├─ pre_traitement.py ──── Deskew + CLAHE + filtres → mode L (grayscale)
-    │
-    ├─ ketos compile ─────── Arrow binaire (train.arrow / dev.arrow)
-    │
-    ├─ compile_arrow.py ──── Filtrage zones bruit → train_clean.arrow
-    │
-    └─ ketos train ───────── Fine-tuning depuis cremma-generic-1.0.1
-                              GPU cloud (Kaggle T4 / Colab A100)
+33 manuscrits (ALTO XML + JPEG)
+    ├─ dataset.py ──────────── Agrégation des 4 corpus HTR-United + manifest.json
+    ├─ pre_traitement.py ───── Deskew + CLAHE + filtres → mode L (grayscale)
+    ├─ ketos compile ───────── Arrow binaire (train.arrow / dev.arrow)
+    ├─ compile_arrow.py ────── Filtrage zones bruit (Music/DropCapital/Interlinear)
+    └─ ketos train ─────────── Fine-tuning depuis cremma-generic-1.0.1 (GPU cloud)
 ```
 
-### Prétraitement des images (`pre_traitement.py`)
+### Résultats des runs
 
-Pipeline de 4 étapes avec diagnostic automatique avant chaque correction :
+| Run | Plateforme | CER | Statut |
+|---|---|:---:|---|
+| 1–3 | Local / Kaggle / Colab | 27–30% | Runs préliminaires, logs partiels |
+| **4** | **Kaggle T4 x2** | **26.3%** | **Meilleure run** (stage 27/37) |
+| 5 | Kaggle T4 x2 | 26.3% | Identique Run 4 (confirme le plafond) |
+| 6 | Colab T4 | ~26.5% | Aborté — mismatch confirmé |
 
-| Étape | Méthode | Paramètres | Seuil déclenchement |
-|-------|---------|-----------|-------------------|
-| Deskew | FFT / projection / Hough | auto par style paléographique | 0.3°–10° |
-| CLAHE | Histogram equalization local | clipLimit=2.0, tileGrid=8×8 | σ_fond < 0.4 |
-| Filtre médian | Convolution médiane | ksize=3 | pixels extrêmes > 0.1% |
-| Filtre gaussien | Flou gaussien | sigma=0.8–1.2 | σ_fond > 5 |
+**Diagnostic** : toutes les runs 1–6 utilisent des données **binarisées (mode 1)**
+alors que `cremma-generic` a été entraîné en **grayscale (mode L)** — ce mismatch crée
+un plafond artificiel à ~74% de val_accuracy. L'expérience en cours (Exp 3, Arrow
+grayscale filtré) vise à lever ce plafond (+10–15 pts CER estimés).
 
-Sortie : images **mode L (grayscale 8-bit)** — compatible avec `cremma-generic` entraîné en mode L.
+Modèles publiés : [legb/htr-cremma-medieval](https://huggingface.co/legb/htr-cremma-medieval) (Hugging Face, CC-BY 4.0).
 
-> Précaution manuscrits médiévaux : `ksize=3` obligatoire pour préserver les déliés gothiques (1–3 px). Ne jamais appliquer le filtre gaussien après binarisation.
+### Démo interactive
 
-### Filtrage des zones bruit (`compile_arrow.py`)
-
-Zones **exclues** du Arrow d'entraînement :
-- `MusicZone` — notation musicale
-- `DropCapitalZone` — lettrines décoratives
-- `InterlinearLine` — annotations interlignaires
-
-Zones **incluses** :
-- `MainZone` — texte courant (94.1%)
-- `MarginTextZone` — marginalia (1.5%)
-
-### Fine-tuning Kraken
+Une application Streamlit (`app.py`, branche `fine_tuning`) permet de tester les
+modèles sur une image de manuscrit : upload, segmentation BLLA, transcription,
+export du data contract JSON — le même format consommé par le Volet 2 NLP.
 
 ```bash
-ketos train \
-  -f binary \
-  -i cremma-generic-1.0.1.mlmodel \
-  --resize union \
-  --augment \
-  --lag 10 \
-  --precision 16-mixed \
-  -b 8 \
-  --workers 4 \
-  -t train_clean.arrow -e dev_clean.arrow
-```
-
-| Paramètre | Valeur | Justification |
-|-----------|--------|---------------|
-| `--resize union` | union des alphabets | Ajoute les 22 caractères absents du modèle de base |
-| `--augment` | activé | Augmentation données (rotation, bruit, déformation) |
-| `--lag 10` | 10 stages | Early stopping — arrêt si pas d'amélioration sur 10 stages |
-| `--precision 16-mixed` | fp16 | Requis T4 (pas de bf16 sur Turing) |
-
----
-
-## 4. Résultats des expériences
-
-### Tableau de bord
-
-| Run | Date | Plateforme | Données | Modèle base | CER | Stages | Statut |
-|-----|------|-----------|---------|-------------|:---:|:------:|--------|
-| 1 | 11 juin | Local Windows | binarisé mode 1 | cremma-medieval_best | ~30% | — | Bloqué (workers Windows) |
-| 2 | 12 juin | Kaggle T4 x2 | binarisé mode 1 | cremma_generic | ~27% | — | Logs partiels |
-| 3 | 13 juin | Colab A100 | binarisé mode 1 | cremma-generic-1.0.1 | 28.1% | 24 | Stagnation stage 12 |
-| **4** | **13 juin** | **Kaggle T4 x2** | **binarisé mode 1** | **cremma_generic** | **26.3%** | **37** | **Meilleur run** |
-| 5 | 14 juin | Kaggle T4 x2 | binarisé mode 1 | cremma-generic-1.0.1 | 26.3% | 37 | Identique Run 4 |
-| 6 | 14 juin | Colab T4 | binarisé mode 1 | cremma_generic | ~26.5% | 14 | Aborté — mismatch confirmé |
-
-### Courbe d'apprentissage — Run 4 (meilleure run)
-
-| Stage | val_accuracy | CER | Patience |
-|-------|:-----------:|:---:|:--------:|
-| 0 | 72.1% | 27.9% | 0/10 |
-| 5 | 72.8% | 27.2% | 0/10 |
-| 10 | 73.2% | 26.8% | 0/10 |
-| 15 | 73.4% | 26.6% | 0/10 |
-| 20 | 73.5% | 26.5% | 0/10 |
-| 27 | **73.67%** | **26.3%** | 0/10 |
-| 37 | 73.67% | 26.3% | 10/10 → stop |
-
-### Diagnostic : le plafond à ~74%
-
-Toutes les runs 1–6 utilisent des données **binarisées (mode 1)** alors que `cremma-generic` a été entraîné sur des images **grayscale (mode L)**. Ce mismatch crée un plafond artificiel.
-
-Preuves convergentes :
-- `WARNING training set contains mode 1 data` présent dès la Run 2
-- Changer de modèle de base (Run 5 vs Run 4) : même CER 26.3%, même stage optimal 27
-- `train.arrow` S3 s'avère binarisé malgré vérification initiale
-
-### Expériences planifiées
-
-| # | Hypothèse | Données | Impact estimé | Statut |
-|---|-----------|---------|:-------------:|--------|
-| Exp 3 | Arrow grayscale filtré (`train_clean.arrow`) | mode L vérifié localement | **+10–15 pts CER** | Données prêtes |
-| Exp 4 | TrOCR fine-tuning (LoRA r=8) vs Kraken | même corpus | comparaison | Planifiée |
-
-### Modèles publiés (HuggingFace)
-
-[legb/htr-cremma-medieval](https://huggingface.co/legb/htr-cremma-medieval) — licence CC-BY 4.0
-
-| Fichier | Expérience | CER | Commit |
-|---------|-----------|:---:|--------|
-| `exp2_binarise_20260613.safetensors` | Baseline binarisée (Run 4/5) | 26.3% | `99843b75` |
-| `exp3_clean_arrow_20260613.safetensors` | Arrow filtré grayscale | en cours | `5e43b1b1` |
-
----
-
-## 5. Évaluation détaillée
-
-> Les métriques ci-dessous seront complétées après Exp 3 et le déscellement du set de test.
-
-### CER par siècle (à compléter)
-
-| Siècle | Documents | CER Run 4 | CER Exp 3 |
-|--------|:---------:|:---------:|:---------:|
-| XIIIe | *n* | *TODO* | *TODO* |
-| XIVe | *n* | *TODO* | *TODO* |
-| XVe | *n* | *TODO* | *TODO* |
-
-### CER par langue (à compléter)
-
-| Langue | Documents | CER Run 4 | CER Exp 3 |
-|--------|:---------:|:---------:|:---------:|
-| Ancien français (`fro`) | *n* | *TODO* | *TODO* |
-| Latin (`lat`) | *n* | *TODO* | *TODO* |
-
-### Comparaison baseline (à compléter)
-
-| Modèle | CER (val) | Delta vs baseline |
-|--------|:---------:|:-----------------:|
-| `cremma-generic-1.0.1` sans fine-tuning | *TODO* | — |
-| Run 4 (fine-tuning binarisé) | 26.3% | *TODO* |
-| Exp 3 (fine-tuning grayscale filtré) | *TODO* | *TODO* |
-
-### Analyse des erreurs (à compléter)
-
-Classes d'erreurs prioritaires à analyser :
-- Abréviations gothiques (titres, nasales, etc.)
-- Lettres ambiguës (u/n, i/m, c/e en gothique textualis)
-- Caractères rares (absents du modèle de base — 22 caractères identifiés)
-- Ligatures médiévales
-
----
-
-## 6. Discussion et limitations
-
-### Ce qui a fonctionné
-
-- **Pipeline de prétraitement adaptatif** : diagnostic automatique par image, évite les corrections inutiles sur les scans propres
-- **Compilation Arrow filtrée** : exclusion des zones bruit via `compile_arrow.py`, reproductible et vérifiable par SHA-256
-- **Infrastructure cloud** : notebooks Kaggle/Colab avec credentials sécurisés, modèles sauvegardés sur S3 + HuggingFace
-
-### Limitations identifiées
-
-1. **Mismatch mode L/1** — toutes les runs 1–6 sur données binarisées → plafond ~74% artificiel. Exp 3 est le premier vrai test grayscale.
-2. **`train.arrow` S3 non-grayscale** — malgré la vérification initiale, le warning Kraken confirme que l'Arrow S3 est binarisé. Seul `train_clean.arrow` compilé localement le 14 juin est vérifié mode L.
-3. **Corpus limité** — 213 documents train, ~18 769 lignes après filtrage. Sous-représentation de certains scribes et du XVe siècle.
-4. **22 caractères absents** — présents dans le train set mais absents de l'alphabet du modèle de base. Gérés par `--resize union` mais non comptabilisés dans l'accuracy officielle.
-5. **Biais linguistique** — majoritairement ancien français parisien, couverture latine sous-représentée.
-6. **Reproductibilité GPU** — résultats légèrement différents entre T4 x1 et T4 x2 (DataParallel), entre Colab et Kaggle.
-
-### Prochaines étapes
-
-- Exp 3 : valider l'hypothèse grayscale avec `train_clean.arrow`
-- Évaluation sur le set de test scellé (3 documents)
-- Analyse qualitative des erreurs différentielles Exp 3 vs Run 4
-- Exp 4 (bonus) : comparaison TrOCR LoRA vs Kraken, test de McNemar
-
----
-
-## 7. Reproductibilité
-
-### Versions exactes utilisées
-
-| Outil | Version |
-|-------|---------|
-| Python | 3.11 |
-| Kraken | 7.0.2 |
-| PyTorch | 2.10.0 |
-| PyTorch Lightning | 2.6.1 |
-| CUDA | 12.x (T4) / 12.x (A100) |
-| huggingface_hub | 1.19.0 |
-
-### Graine aléatoire
-
-Kraken ne supporte pas de seed fixe globale — les résultats peuvent varier de ±0.2% CER entre runs identiques sur le même hardware.
-
-### Checksums des données
-
-| Fichier | SHA-256 |
-|---------|---------|
-| `train_clean.arrow` | `1bec767c9a87caa322b20dc054da85e161ab3e630c498eb1a35ae51d19348026` |
-| `dev_clean.arrow` | `20ef530c68228695bb1b68f07a07b6eb2e2ffde0f62fd8e9c2e6b29d6720448e` |
-| `cremma-generic-1.0.1.mlmodel` | *TODO — à récupérer depuis Zenodo 7631619* |
-
----
-
-## 8. Pipeline — utilisation
-
-### Étape 1 — Prétraitement
-
-```bash
-python src/pre_traitement.py data/repos/ --output data/preprocessed_grayscale/
-```
-
-### Étape 2 — Compilation Arrow filtrée
-
-```bash
-python src/compile_arrow.py \
-  --splits data/splits/train.txt data/splits/dev.txt \
-  --output data/splits/arrow_clean/
-```
-
-### Étape 3 — Entraînement (Kaggle / Colab)
-
-| Notebook | Plateforme | Expérience |
-|----------|-----------|-----------|
-| `notebooks/kaggle_exp3_clean_arrow.ipynb` | Kaggle T4 x2 | Exp 3 — Arrow filtré grayscale |
-| `notebooks/colab_exp3_clean_arrow.ipynb` | Colab A100 / T4 | Exp 3 — Arrow filtré grayscale |
-| `notebooks/colab_exp2_grayscale.ipynb` | Colab T4 | Exp 2 — aborté (référence) |
-
-Les notebooks récupèrent les credentials AWS depuis **Kaggle Secrets** / **Colab Secrets** — jamais hardcodés.
-
-### Lancer les tests
-
-```bash
-pytest tests/
-```
-
-### Vérifier le mode d'un Arrow
-
-```python
-import pyarrow as pa
-reader = pa.ipc.open_file("data/splits/arrow_clean/train_clean.arrow")
-batch = reader.get_batch(0)
-# im doit être mode L (grayscale), pas mode 1 (binarisé)
-```
-
-### Uploader un modèle sur HuggingFace
-
-```bash
-hf auth login
-hf upload legb/htr-cremma-medieval models/mon_modele.safetensors mon_modele.safetensors
-```
-
----
-
-## 9. Structure du projet
-
-```
-htr-cremma-medieval-2026/
-│
-├── src/
-│   ├── pre_traitement.py        ← Pipeline prétraitement images (deskew, CLAHE, filtres)
-│   ├── compile_arrow.py         ← Compilation Arrow filtré (sans zones bruit)
-│   ├── train.py                 ← Script entraînement local (référence)
-│   └── aws_sagemaker_launch.py  ← Orchestrateur SageMaker (optionnel)
-│
-├── notebooks/
-│   ├── kaggle_exp3_clean_arrow.ipynb   ← Exp 3 — Kaggle T4
-│   ├── colab_exp3_clean_arrow.ipynb    ← Exp 3 — Colab
-│   └── colab_exp2_grayscale.ipynb      ← Exp 2 — aborté (référence)
-│
-├── experiments/
-│   ├── EXPERIMENT_LOG.md        ← Journal des hypothèses et décisions
-│   └── journal.jsonl            ← Logs structurés machine-readable (une ligne par run)
-│
-├── tests/
-│   └── test_pretraitement.py    ← Tests non-régression pipeline image
-│
-├── data/
-│   ├── splits/                  ← Fichiers .txt (train/dev/test) + Arrow compilés
-│   └── repos/                   ← Clones des corpus HTR-United (gitignore)
-│
-├── models/                      ← Modèles téléchargés localement (gitignore)
-│
-├── README.md                    ← Ce fichier
-├── MODEL_CARD.md                ← Fiche modèle officielle
-├── TRAINING_RUNS.md             ← Historique détaillé des runs
-├── DATA_SOURCES.md              ← Sources corpus + SHA-256 + liens HuggingFace
-├── CONVENTIONS_TRANSCRIPTION.md ← Règles de transcription CREMMA
-└── requirements.txt
-```
-
----
-
-## 10. Installation
-
-```bash
-git clone https://github.com/loulou441/htr-cremma-medieval-2026.git
-cd htr-cremma-medieval-2026
-
-python -m venv cremma
-cremma\Scripts\activate      # Windows
-# source cremma/bin/activate  # Linux/macOS
-
+git checkout fine_tuning
 pip install -r requirements.txt
+streamlit run app.py
 ```
+
+### Limitations connues (Volet 1)
+
+- Mismatch mode L/1 non résolu sur toutes les runs sauf Exp 3 (en cours).
+- Corpus limité (33 manuscrits) — sous-représentation de certains scribes et des
+  scripts minoritaires (*Semitextualis Currens*, *Textualis Currens*).
+- 22 caractères présents dans le train set mais absents de l'alphabet du modèle de
+  base (gérés via `--resize union`, non comptabilisés dans l'accuracy officielle).
+- Biais linguistique : majoritairement ancien français parisien.
+- Reproductibilité GPU : Kraken ne supporte pas de seed globale fixe (±0.2% CER
+  entre runs identiques).
 
 ---
 
-## 11. Infrastructure cloud
+## 4. Volet 2 — NLP : normalisation, correction, structuration
 
-### Amazon S3 (privé)
+*(Résumé — détail complet, référence des 11 commandes CLI et section
+reproductibilité complète sur la [branche `nlp-pipeline-completed`](https://github.com/Loulou441/htr-manuscrits-XIIIe-siecle/blob/nlp-pipeline-completed/README.md))*
+
+### Objectif
+
+Le modèle HTR du Volet 1 a été utilisé pour transcrire 16 manuscrits supplémentaires
+depuis Gallica/BnF (129 documents, 16 336 lignes), produisant pour chaque page un
+**data contract JSON** (texte, confiance par caractère, candidats alternatifs). Ce
+volet transforme cette sortie brute en texte exploitable, sans vérité terrain
+complète disponible — l'évaluation y est donc majoritairement **relative** (CER entre
+variantes) plutôt qu'absolue.
+
+### Pipeline
 
 ```
-s3://htr-cremma-medieval/
-├── base-model/
-│   ├── cremma_generic.mlmodel           (21.8 MB — Zenodo 7234166)
-│   └── cremma-generic-1.0.1.mlmodel    (21.7 MB — Zenodo 7631619)
-├── splits/
-│   ├── train.arrow                      (939 MB — binarisé mode 1)
-│   ├── dev.arrow                        (144 MB — binarisé mode 1)
-│   ├── train_clean.arrow                (914 MB — grayscale mode L filtré)
-│   └── dev_clean.arrow                  (144 MB — grayscale mode L filtré)
-└── output/
-    └── (modèles fine-tunés)
+Data contract HTR (JSON brut, 129 documents)
+        ↓ validate (schéma JSON strict) → eda (métriques exploratoires)
+        ↓ review-queue (triage direct / review / exclude par confiance)
+        ↓ normalisation par règles : NFC, u/v, i/j, tilde nasal, table d'abréviations
+        ↓ correction guidée par confiance : CamemBERT MLM (almanach/camembert-base)
+        ↓ détection lexicale (dictionnaire ancien français) + évaluation relative (CER pairwise)
+        ↓ split stratifié (siècle × type de document) + scellement SHA-256 du test set
 ```
 
-### Plateformes GPU
+Toutes les étapes sont exposées via un CLI unifié :
+`python nlp_pipeline/nlp_cli.py <commande> [options]` — 11 commandes au total
+(`validate`, `eda`, `review-queue`, `normalize`, `normalize-contract`, `correct`,
+`ablation`, `relative-eval`, `detect-normalization`, `lexical-check`, `split`).
 
-| Plateforme | GPU | Batch | Precision | Durée/run |
-|-----------|-----|:-----:|:---------:|:---------:|
-| Kaggle T4 x2 | 2× T4 16 GB | 8 | 16-mixed | ~2h30 |
-| Colab A100 | A100 40 GB | 16 | bf16-mixed | ~5h30 |
-| Colab T4 | T4 16 GB | 8 | 16-mixed | ~3h |
+### Résultats (run du 18 juin 2026, 129 documents, 16 336 lignes)
+
+| Mesure | Valeur |
+|---|---|
+| Documents validés contre le schéma | 129 / 129 (100%) |
+| Confiance HTR moyenne | 0.793 |
+| Lignes signalées pour révision | 36.8% |
+| Paires de mots corrigées par les règles de normalisation | 3725 |
+| CER pairwise moyen (raw / normalisé / corrigé) | 0.0667 |
+| Tokens couverts par le dictionnaire ancien français | 4.4% |
+| Tests unitaires | 22 / 22 |
+
+### Reproductibilité
+
+Points déjà solides : seed fixée (`--seed 67`) pour le split stratifié, test set
+scellé et vérifiable par hash SHA-256, correction MLM déterministe (modèle en mode
+évaluation par construction, pas d'échantillonnage), 22 tests unitaires entièrement
+autonomes (aucune dépendance au corpus réel).
+
+Points encore ouverts : dépendances non verrouillées (bornes basses uniquement dans
+`requirements.txt`), version de Python non documentée formellement, modèle CamemBERT
+non épinglé à une révision Hugging Face précise. Détail complet dans la section
+*Reproductibilité* du [README de la branche NLP](https://github.com/Loulou441/htr-manuscrits-XIIIe-siecle/blob/nlp-pipeline-completed/README.md#14-reproductibilité).
+
+### Limitations connues (Volet 2)
+
+- **Détection lexicale (4.4% de couverture)** : limite de la ressource externe (mots-outils absents du dictionnaire), pas un échec de la normalisation.
+- **Correction guidée par confiance** : `candidates` est `null` sur la quasi-totalité des lignes réelles → le scorer CamemBERT, bien qu'actif par défaut, n'a rien à arbitrer sur ce run (0 correction). Le mécanisme est fonctionnel et a été vérifié sur données synthétiques.
+- **Règle u/v** : compromis assumé qui empêche la correction de `deuient→devient` pour éviter davantage de faux positifs ailleurs.
 
 ---
 
-## 12. Références
+## 5. Résultats globaux du projet
+
+| | Volet 1 — HTR | Volet 2 — NLP |
+|---|---|---|
+| Corpus | 33 manuscrits (entraînement) | 16 manuscrits / 129 documents (transcrits en aval) |
+| Lignes | 22 858 (brut), 18 769 (filtré train) | 16 336 |
+| Métrique clé | CER 26.3% (objectif < 15%) | CER pairwise 0.0667 (relatif, pas de vérité terrain) |
+| Statut | Exp 3 (grayscale) en cours pour lever le plafond à 74% | Normalisation + triage opérationnels ; NER/POS/graphe/TEI non démarrés |
+| Tests automatisés | `pytest tests/` (Volet HTR) | `pytest nlp_pipeline/tests/ -q` — 22/22 |
+
+---
+
+## 6. Limitations transversales
+
+- **Aucun des deux volets ne dispose d'une vérité terrain complète** sur son corpus de production (Volet 1 : set de test scellé mais évaluation détaillée par script encore *à compléter* ; Volet 2 : évaluation relative uniquement). Les deux README détaillés documentent précisément ce qui est mesuré et comment.
+- **Reproductibilité des dépendances** : les deux volets utilisent des `requirements.txt` avec bornes basses uniquement (`>=`), sans lockfile — un point d'attention commun avant tout rendu final ou publication.
+- **Données lourdes non versionnées** (corpus, modèles, Arrow, dictionnaire ancien français) : gérées via S3 (Volet 1) et exclues par `.gitignore` (Volet 2) — cloner le dépôt reproduit le code et les tests, pas les données de production.
+
+---
+
+## 7. Prochaines étapes
+
+**Volet 1 (HTR)** : valider l'hypothèse grayscale (Exp 3), évaluer sur le set de test scellé, analyse différentielle par script paléographique, comparaison optionnelle TrOCR (LoRA) vs Kraken.
+
+**Volet 2 (NLP)** : générer de vraies entrées `candidates` pour exercer réellement le scorer CamemBERT, enrichir le dictionnaire de référence, verrouiller les dépendances (`pyproject.toml`/lockfile). Plan « after » en 4 phases séquentielles : baseline NER, fine-tuning léger NER, POS + extraction de relations par règles, graphe NetworkX + export TEI-XML — évaluation à chaque phase via CER relatif, faute de vérité terrain.
+
+---
+
+## 8. Installation rapide
+
+```bash
+git clone https://github.com/Loulou441/htr-manuscrits-XIIIe-siecle.git
+cd htr-manuscrits-XIIIe-siecle
+
+# Volet 1 — HTR (entraînement, prétraitement, démo Streamlit)
+git checkout fine_tuning
+pip install -r requirements.txt
+
+# Volet 2 — NLP (normalisation, correction, CLI)
+git checkout nlp-pipeline-completed
+pip install -r requirements.txt --break-system-packages
+pytest nlp_pipeline/tests/ -q
+```
+
+Chaque branche a son propre `requirements.txt` et sa propre suite de tests — voir les
+README de branche pour le détail des commandes et options.
+
+---
+
+## 9. Références
 
 ### Corpus et données
 
-- **CREMMA-Medieval** — HTR-United / ENC-PSL. <https://github.com/HTR-United/cremma-medieval>
-- **CREMMA-Medieval-LAT** — HTR-United. <https://github.com/HTR-United/CREMMA-Medieval-LAT>
-- **HTRomance Medieval French** — <https://github.com/HTRomance-Project/medieval-french>
-- **HTRomance Medieval Latin** — <https://github.com/HTRomance-Project/medieval-latin>
+- **CREMMA-Medieval** / **CREMMA-Medieval-LAT** — HTR-United / ENC-PSL.
+- **HTRomance Medieval French / Latin** — HTRomance-Project.
 
-### Modèles de base
+### Modèles et frameworks
 
 - **cremma_generic** — Pinche, A. (2022). Zenodo. DOI: [10.5281/zenodo.7234166](https://doi.org/10.5281/zenodo.7234166)
-- **cremma-generic-1.0.1** — Zenodo. DOI: [10.5281/zenodo.7631619](https://doi.org/10.5281/zenodo.7631619)
+- **Kraken** — Kiessling, B. (2019). *Kraken — an Universal Text Recognizer for the Humanities*. DH2019.
+- **almanach/camembert-base** — modèle de langue français (Hugging Face), utilisé pour la correction guidée par confiance (Volet 2).
+- **SegmOnto** — schéma d'annotation de zones, [segmonto.github.io](https://segmonto.github.io).
 
-### Framework HTR
-
-- **Kraken** — Kiessling, B. (2019). *Kraken — an Universal Text Recognizer for the Humanities*. DH2019. <https://github.com/mittagessen/kraken>
-- **SegmOnto** — <https://segmonto.github.io>
-
-### Conventions de transcription
+### Conventions et méthodologie
 
 - **Pinche, A.** (2022). *Guide de transcription pour les manuscrits du Xe au XVe siècle*. HAL.
-
-### Prétraitement
-
-- **Sauvola & Pietikäinen** (2000). *Adaptive Document Image Binarization*. Pattern Recognition, 33(2), 225–236.
+- **Sauvola & Pietikäinen** (2000). *Adaptive Document Image Binarization*. Pattern Recognition, 33(2).
 - **Zuiderveld, K.** (1994). *Contrast Limited Adaptive Histogram Equalization*. Graphics Gems IV.
 
-### Citation
+### Documentation complète
+
+- [README — Volet 1 HTR (branche `fine_tuning`)](https://github.com/Loulou441/htr-manuscrits-XIIIe-siecle/blob/fine_tuning/README.md)
+- [README — Volet 2 NLP (branche `nlp-pipeline-completed`)](https://github.com/Loulou441/htr-manuscrits-XIIIe-siecle/blob/nlp-pipeline-completed/README.md)
+- Article scientifique complet (format IEEE) : `article/HTR_Manuscrits_XIIIe_siecle.pdf` sur la branche `fine_tuning`.
+
+---
+
+## 10. Citation
 
 ```bibtex
-@misc{htr-cremma-medieval-2026,
-  title  = {HTR CREMMA Medieval 2026 — Fine-tuning Kraken sur manuscrits médiévaux},
+@misc{htr-manuscrits-xiiie-siecle-2026,
+  title  = {HTR + NLP sur manuscrits médiévaux du XIIIe siècle : fine-tuning Kraken et pipeline de normalisation},
   author = {Ouazar, Djamal and Tessier, Manon and El Mortada, Hamza},
   year   = {2026},
-  url    = {https://github.com/loulou441/htr-cremma-medieval-2026}
+  url    = {https://github.com/Loulou441/htr-manuscrits-XIIIe-siecle}
 }
 ```
