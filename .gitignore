@@ -248,3 +248,5 @@ reports/
 
 # AWS SageMaker artifacts
 htr-cremma-training-*/
+
+.DS_Store
