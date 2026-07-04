@@ -2,7 +2,7 @@
 
 Volet NLP du projet HTR Manuscrits XIIIe Siècle. Ce document couvre **uniquement le pipeline NLP** de cette branche : ingestion du data contract HTR, normalisation par règles, correction guidée par confiance (CamemBERT MLM), détection lexicale, évaluation relative (CER pairwise) et split stratifié.
 
-> Le pipeline NLP prend en entrée la sortie du modèle HTR (Kraken) développé dans le Volet 1 du projet (`batch_transcribe.py`). L'entraînement HTR lui-même (CER, architecture, expériences) n'est pas couvert ici.
+> Le pipeline NLP prend en entrée la sortie du modèle HTR (Kraken) développé dans le Volet 1 du projet (`nlp_pipeline/batch_transcribe.py`). L'entraînement HTR lui-même (CER, architecture, expériences) n'est pas couvert ici.
 
 ---
 
@@ -58,7 +58,7 @@ Comme pour le HTR, **aucune vérité terrain complète** n'existe pour ces manus
 
 ## 2. Le data contract HTR
 
-Chaque page transcrite par le modèle HTR est un JSON validé par un schéma strict (`nlp_pipeline/htr_data_contract_schema.json`) :
+Chaque page transcrite par le modèle HTR est un JSON validé par un schéma strict (`nlp_pipeline/json_files/htr_data_contract_schema.json`) :
 
 ```json
 {
@@ -99,23 +99,24 @@ Chaque page transcrite par le modèle HTR est un JSON validé par un schéma str
 
 **129/129 documents valides** contre le schéma sur le corpus complet du run de référence.
 
-Ce même format est produit par `batch_transcribe.py` (`build_data_contract()`) à partir des prédictions Kraken — c'est le point de jonction exact entre le Volet HTR et ce pipeline NLP.
+Ce même format est produit par `nlp_pipeline/batch_transcribe.py` (`build_data_contract()`) à partir des prédictions Kraken — c'est le point de jonction exact entre le Volet HTR et ce pipeline NLP.
 
 ---
 
 ## 3. Architecture du pipeline NLP
 
-Tout le code NLP de cette branche est regroupé, à plat, dans un seul package :
+Tout le code de cette branche est regroupé dans un seul package `nlp_pipeline/` :
 
 ```
 nlp_pipeline/
 ├── htr_data_contract.py         # validation, EDA, triage, split stratifié + scellement
-├── htr_data_contract_schema.json  # schéma JSON du data contract (validation jsonschema)
 ├── normalization_rules.py       # normaliseur par règles + détection lexicale/abréviations
-├── medieval_abbreviations.json  # table d'abréviations médiévales (14 entrées)
 ├── confidence_correction.py     # correction guidée par confiance (CamemBERT MLM)
 ├── cer_utils.py                  # CER, WER, CER pairwise moyen
 ├── nlp_cli.py                    # CLI unifié exposant toutes les commandes
+├── json_files/                   # schéma + table d'abréviations (config, pas du code)
+│   ├── htr_data_contract_schema.json
+│   └── medieval_abbreviations.json
 └── tests/                        # suite pytest (voir section 13)
 ```
 
@@ -127,7 +128,9 @@ python nlp_pipeline/nlp_cli.py <commande> [options]
 
 Les commandes disponibles : `validate`, `eda`, `review-queue`, `normalize`, `normalize-contract`, `correct`, `ablation`, `relative-eval`, `detect-normalization`, `lexical-check`, `split`.
 
-> **Note** : `nlp_pipeline/` contient aussi deux scripts qui ne font pas partie de la logique NLP elle-même — `evaluate_model.py` (évaluation CER/WER du modèle **HTR**, indépendant du CLI ci-dessus) et `sync_to_s3.py` (synchronisation infra vers S3). Les deux sont vérifiés fonctionnels (imports propres, pas de dépendance manquante) mais restent hors du périmètre décrit dans ce document.
+**Chemins par défaut** : `nlp_cli.py` calcule `DEFAULT_SCHEMA` et `DEFAULT_ABBR` relativement à son propre emplacement (`Path(__file__).parent / "json_files" / ...`), donc les commandes fonctionnent sans `--schema`/`--abbreviations` explicite quel que soit le répertoire depuis lequel on les lance — voir [test_nlp_cli_defaults.py](#13-tests) qui verrouille cette garantie.
+
+> **Note** : `nlp_pipeline/` contient aussi trois scripts qui ne font pas partie de la logique NLP elle-même — `batch_transcribe.py` et `evaluate_model.py` (Volet HTR : extraction/transcription batch et évaluation CER/WER du modèle Kraken) et `sync_to_s3.py` (synchronisation infra vers S3). Les trois sont vérifiés fonctionnels (imports propres) mais restent hors du périmètre NLP décrit dans ce document — leur présence dans ce dossier est un choix d'organisation du dépôt, pas une dépendance technique envers le reste du package.
 
 ---
 
@@ -190,7 +193,7 @@ Avant toute correction statistique/IA, six règles déterministes sont appliqué
    *Exception* : les digrammes `qu`/`gu` et `u+i` (`lui`) gardent leur `u` vocalique — compromis qui empêche `deuient→devient`, accepté car les faux positifs corrigés sont bien plus fréquents que ce faux négatif.
 4. **i/j** — `i` consonantique devant voyelle (sauf digramme `ie`/`ien`/`ier`).
 5. **tilde nasal** — `a~/e~/o~` → `an/en/on`.
-6. **table d'abréviations** (`nlp_pipeline/medieval_abbreviations.json`) — 14 marqueurs scribaux et latinismes (`⁊→et`, `ꝑ→per`, `dñs→dominus`, etc.), appliqués du plus long au plus court pour éviter les collisions.
+6. **table d'abréviations** (`nlp_pipeline/json_files/medieval_abbreviations.json`) — 14 marqueurs scribaux et latinismes (`⁊→et`, `ꝑ→per`, `dñs→dominus`, etc.), appliqués du plus long au plus court pour éviter les collisions.
 
 ```bash
 # Sur du texte brut
@@ -342,6 +345,8 @@ Options communes à `normalize-contract` et `correct` : `--input` (fichier ou do
 
 Options spécifiques à `correct` : `--threshold` (seuil de confiance, défaut `0.7`), `--mlm-model` (défaut `almanach/camembert-base`), `--mlm-device` (défaut `auto`), `--no-mlm` (scorer heuristique de repli), `--no-review-update` (désactive la réinjection de `needs_review`), `--log-output` (journal `.jsonl` des corrections).
 
+Tous les chemins par défaut (`--schema`, `--abbreviations`) sont résolus relativement à `nlp_pipeline/json_files/`, indépendamment du répertoire courant.
+
 ---
 
 ## 12. Structure des fichiers de la branche
@@ -353,34 +358,38 @@ Arborescence réellement versionnée sur `nlp-pipeline-completed` :
 ├── LICENSE
 ├── README.md
 ├── requirements.txt
-├── batch_transcribe.py            # extraction + transcription batch (HTR, Volet 1 — hors périmètre NLP)
 ├── docs/
 │   ├── CONVENTIONS_NLP.md         # conventions détaillées (normalisation, schéma BIO, etc.)
 │   ├── PRESENTATION_NLP.md        # support de présentation
 │   └── RAPPORT_NLP_2026-06-18.md  # rapport détaillé daté (chronologie, résultats mesurés)
 ├── notebooks/
-│   ├── kaggle_eval_test.ipynb
-│   ├── nlp_cli_kaggle.ipynb
-│   └── nlp_cli_local.ipynb
+│   ├── kaggle_eval_test.ipynb      # évaluation CER d'un modèle HTR (Volet HTR, sans lien avec nlp_cli.py)
+│   ├── nlp_cli_kaggle.ipynb        # pipeline NLP bout-en-bout sur un document, environnement Kaggle + S3
+│   └── nlp_cli_local.ipynb        # même démo, en local, sans clone Git ni sync S3
 ├── resources/
 │   └── manuscrits_xiii_siecle.txt # liste source des manuscrits Gallica/BnF
 └── nlp_pipeline/
     ├── htr_data_contract.py
-    ├── htr_data_contract_schema.json
     ├── normalization_rules.py
-    ├── medieval_abbreviations.json
     ├── confidence_correction.py
     ├── cer_utils.py
     ├── nlp_cli.py
+    ├── batch_transcribe.py         # hors périmètre NLP — extraction/transcription batch (Volet HTR)
     ├── evaluate_model.py           # hors périmètre NLP — évaluation HTR (CER/WER)
     ├── sync_to_s3.py                # hors périmètre NLP — infra
+    ├── json_files/
+    │   ├── htr_data_contract_schema.json
+    │   └── medieval_abbreviations.json
     └── tests/
         ├── test_cer_utils.py
         ├── test_htr_data_contract.py
         ├── test_nlp_cli.py
+        ├── test_nlp_cli_defaults.py
         ├── test_normalization_rules.py
         └── test_normalization_cer_regression.py
 ```
+
+`nlp_cli_kaggle.ipynb` et `nlp_cli_local.ipynb` exécutent 7 des 11 commandes du CLI sur un document HTR unique : `validate`, `eda`, `review-queue`, `normalize-contract`, `correct`, `relative-eval`, `lexical-check`. `split` n'y figure pas volontairement : il opère sur une liste de métadonnées de documents (`--records documents_metadata.json`), pas sur un data contract individuel comme les étapes démontrées — voir [section 10](#10-split-stratifié-et-test-set-scellé) pour son usage réel sur le corpus complet.
 
 **Répertoires runtime, non versionnés** (générés localement par le pipeline, exclus via `.gitignore` : `data/`, `reports/`, `models/`) — chemins utilisés dans les exemples de commandes ci-dessus :
 
@@ -391,8 +400,11 @@ data/
 ├── nlp_output_corrected/          # après correct
 ├── review/                        # CSV, JSON, logs, rapports CER
 ├── splits_nlp/                    # train/val/test + scellement
+├── downloads/                     # pages Gallica téléchargées par batch_transcribe.py
 └── dictionary/                    # dictionnaire ancien français (non fourni dans le repo)
 ```
+
+> **Point d'attention `.gitignore`** : les commandes CLI écrivent leurs sorties par défaut sous `data/...` et leur journal d'exécution dans `data/review/nlp_cli_run_log.jsonl` — chemins **relatifs au répertoire courant**, pas à l'emplacement des scripts. Lancer une commande depuis `nlp_pipeline/` plutôt que depuis la racine du dépôt créerait donc un `nlp_pipeline/data/` parasite (déjà vu pendant la vérification de cette branche). Comme `.gitignore` ignore `data` sans égard à la profondeur, ce dossier resterait bien ignoré par git où qu'il apparaisse — mais toujours lancer les commandes `nlp_cli.py` depuis la racine du dépôt pour éviter la confusion.
 
 ---
 
@@ -403,14 +415,15 @@ pip install -r requirements.txt --break-system-packages
 pytest nlp_pipeline/tests/ -q
 ```
 
-**20 tests**, répartis sur 5 fichiers dans `nlp_pipeline/tests/` :
+**22 tests**, répartis sur 6 fichiers dans `nlp_pipeline/tests/` :
 - `test_cer_utils.py` (4) — CER, WER, cohérence des deux conventions de calcul.
 - `test_htr_data_contract.py` (4) — validation de schéma, EDA, triage.
 - `test_nlp_cli.py` (1) — CER pairwise moyen.
+- `test_nlp_cli_defaults.py` (2) — les chemins par défaut du CLI (`DEFAULT_SCHEMA`, `DEFAULT_ABBR`) pointent vers des fichiers qui existent réellement sur le disque. Ajouté après un bug réel : le déplacement du schéma et de la table d'abréviations vers `json_files/` avait cassé ces chemins par défaut sans qu'aucun test ne le détecte.
 - `test_normalization_rules.py` (8) — règles de normalisation, détection d'abréviations, erreurs lexicales.
 - `test_normalization_cer_regression.py` (3) — non-régression du CER sur un échantillon de référence après normalisation (moyenne + ligne par ligne).
 
-Ces 20 tests sont **entièrement autonomes** : aucun n'a besoin des données du corpus réel (`data/`, non versionnées) — ils tournent sur des exemples codés en dur ou générés dans des répertoires temporaires (`tmp_path`). C'est ce qui garantit qu'ils passent de manière identique sur n'importe quelle machine, y compris sans accès aux 129 manuscrits transcrits.
+Ces 22 tests sont **entièrement autonomes** : aucun n'a besoin des données du corpus réel (`data/`, non versionnées) — ils tournent sur des exemples codés en dur, sur les fichiers réels de `json_files/`, ou dans des répertoires temporaires (`tmp_path`). C'est ce qui garantit qu'ils passent de manière identique sur n'importe quelle machine, y compris sans accès aux 129 manuscrits transcrits.
 
 Dépendances NLP ajoutées : `jsonschema>=4.21`, `pytest>=8.0`, `transformers>=4.0`, `sentencepiece>=0.1.0` (CamemBERT MLM), `Pillow>=10.0` (requis par `evaluate_model.py`).
 
@@ -434,17 +447,19 @@ Cette section liste, honnêtement, ce qui est garanti reproductible aujourd'hui 
 - **Seed fixée pour le split** : `stratified_split_records(..., seed=67)`, valeur par défaut du CLI (`--seed 67`). Deux exécutions de `split` sur les mêmes `--records` produisent exactement la même répartition `train/val/test`.
 - **Test set scellé et vérifiable** : `seal_test_set()` calcule un SHA-256 du contenu JSON du test set au moment de sa création. Toute modification ultérieure (volontaire ou accidentelle) du fichier `test_sealed.json` est détectable en recalculant ce hash — c'est la garantie qu'aucune fuite de données de test n'a eu lieu pendant le développement.
 - **Correction MLM déterministe par construction** : `AutoModelForMaskedLM.from_pretrained()` place le modèle en mode évaluation (`model.eval()`, dropout désactivé) dès le chargement — comportement par défaut de `transformers` depuis plusieurs versions majeures. Le scoring se fait uniquement par un `forward` sous `torch.no_grad()`, sans échantillonnage : à entrée et device identiques, la sortie est strictement identique d'une exécution à l'autre. Aucun `torch.manual_seed()` n'est donc nécessaire pour cette étape.
+- **Chemins par défaut découplés du répertoire d'exécution** : `DEFAULT_SCHEMA`/`DEFAULT_ABBR` sont calculés via `Path(__file__).parent`, donc résolus par rapport à l'emplacement des fichiers Python et non au répertoire courant — les commandes se comportent de façon identique qu'on les lance depuis la racine du dépôt ou d'ailleurs. Ce point est maintenant verrouillé par `test_nlp_cli_defaults.py` (voir [section 13](#13-tests)) suite à une régression réelle où ces chemins pointaient vers un emplacement obsolète après réorganisation des fichiers JSON.
 - **Tests unitaires 100% autonomes** (voir [section 13](#13-tests)) : reproductibles sur n'importe quelle machine sans accès au corpus réel.
-- **Schéma JSON strict** (`htr_data_contract_schema.json`) : garantit que la structure de données consommée par le pipeline reste stable dans le temps, indépendamment de qui produit les data contracts.
+- **Schéma JSON strict** (`json_files/htr_data_contract_schema.json`) : garantit que la structure de données consommée par le pipeline reste stable dans le temps, indépendamment de qui produit les data contracts.
 
 ### ⚠️ Ce qui n'est pas encore garanti — à corriger avant un rendu final
 
-- **Dépendances non pinnées** : `requirements.txt` ne fixe que des bornes basses (`transformers>=4.0`, `torch>=2.4.0`, etc.), sans borne haute ni fichier de verrouillage (`pyproject.toml` + lockfile, ou `pip freeze`). Un `pip install -r requirements.txt` refait dans 6 mois peut résoudre des versions différentes de celles utilisées pour produire les résultats de la [section 15](#15-résultats-sur-le-corpus-complet) — `transformers` en particulier a un historique de changements d'API qui peuvent affecter la tokenisation ou les sorties du MLM. **Recommandation** : générer un `requirements-lock.txt` (`pip freeze`) au moment du rendu, ou migrer vers `pyproject.toml` avec versions exactes, comme demandé par les consignes du projet.
+- **Dépendances non pinnées** : `requirements.txt` ne fixe que des bornes basses (`transformers>=4.0`, `torch>=2.4.0`, etc.), sans borne haute ni fichier de verrouillage (`pyproject.toml` + lockfile, ou `pip freeze`). Un `pip install -r requirements.txt` refait dans 6 mois peut résoudre des versions différentes de celles utilisées pour produire les résultats de la [section 15](#15-résultats-sur-le-corpus-complet). **Recommandation** : générer un `requirements-lock.txt` (`pip freeze`) au moment du rendu, ou migrer vers `pyproject.toml` avec versions exactes, comme demandé par les consignes du projet.
 - **Version de Python non documentée** : aucun `.python-version` ni `requires-python` dans le dépôt. Ce document a été vérifié avec Python 3.12 ; à préciser explicitement pour que l'environnement soit reconstructible à l'identique.
-- **Modèle CamemBERT non épinglé à une révision** : `almanach/camembert-base` est référencé par son seul nom de dépôt Hugging Face, sans `revision=<commit_sha>`. Le poids du modèle de base a très peu de chances de changer, mais rien ne l'interdit formellement côté Hugging Face — épingler une révision précise (`from_pretrained(model_name, revision="...")`) supprimerait ce doute pour un rendu qui doit rester reproductible à long terme.
-- **`--mlm-device auto` peut varier d'une machine à l'autre** : sur une machine avec GPU, `auto` choisira `cuda` ; sur une machine sans GPU, `cpu`. Les résultats du MLM sont déterministes *sur un device donné*, mais de très légers écarts de calcul flottant peuvent apparaître entre CPU et GPU (différences d'implémentation des kernels). Pour comparer des runs bit-à-bit, fixer explicitement `--mlm-device cpu` (ou `cuda`) plutôt que `auto`.
-- **Reproductibilité des résultats du corpus complet (section 15) ≠ reproductibilité du code** : les 129 documents, le dictionnaire ancien français et l'échantillon `reference_200.csv` ne sont **pas versionnés** dans cette branche (`.gitignore` exclut `data/`). Cloner ce dépôt et lancer `pytest` reproduit fidèlement le comportement du code (20/20 tests), mais **ne reproduit pas** à lui seul les chiffres de la section 15 — il faut disposer séparément des données sources (sortie HTR, dictionnaire). À documenter clairement si ce dépôt doit être repris par quelqu'un d'autre : soit fournir ces artefacts par un canal externe (S3, cf. `sync_to_s3.py`), soit documenter précisément comment les regénérer.
-- **`stratified_split_records()` modifie l'état global de `random`** : elle appelle `random.seed(seed)` sur le module `random` global plutôt que d'utiliser une instance locale (`random.Random(seed)`). Sans conséquence pour un appel CLI isolé (process à usage unique), mais à corriger si cette fonction est un jour appelée plusieurs fois dans un même processus Python (notebook, pipeline orchestré) : le seed d'un appel pourrait affecter un autre code utilisant `random` dans la même session.
+- **Modèle CamemBERT non épinglé à une révision** : `almanach/camembert-base` est référencé par son seul nom de dépôt Hugging Face, sans `revision=<commit_sha>`. Le poids du modèle de base a très peu de chances de changer, mais épingler une révision précise (`from_pretrained(model_name, revision="...")`) supprimerait ce doute pour un rendu qui doit rester reproductible à long terme.
+- **`--mlm-device auto` peut varier d'une machine à l'autre** : sur une machine avec GPU, `auto` choisira `cuda` ; sur une machine sans GPU, `cpu`. Les résultats du MLM sont déterministes *sur un device donné*, mais de très légers écarts de calcul flottant peuvent apparaître entre CPU et GPU. Pour comparer des runs bit-à-bit, fixer explicitement `--mlm-device cpu` (ou `cuda`) plutôt que `auto`.
+- **Reproductibilité des résultats du corpus complet (section 15) ≠ reproductibilité du code** : les 129 documents, le dictionnaire ancien français et l'échantillon `reference_200.csv` ne sont **pas versionnés** dans cette branche (`.gitignore` exclut `data/`). Cloner ce dépôt et lancer `pytest` reproduit fidèlement le comportement du code (22/22 tests), mais **ne reproduit pas** à lui seul les chiffres de la section 15 — il faut disposer séparément des données sources (sortie HTR, dictionnaire).
+- **`stratified_split_records()` modifie l'état global de `random`** : elle appelle `random.seed(seed)` sur le module `random` global plutôt que d'utiliser une instance locale (`random.Random(seed)`). Sans conséquence pour un appel CLI isolé (process à usage unique), mais à corriger si cette fonction est un jour appelée plusieurs fois dans un même processus Python (notebook, pipeline orchestré).
+- **Toujours lancer `nlp_cli.py` depuis la racine du dépôt** : les sorties par défaut (`data/review/...`) sont relatives au répertoire courant, pas à l'emplacement du script — voir l'encadré en [section 12](#12-structure-des-fichiers-de-la-branche).
 
 ---
 
@@ -458,7 +473,7 @@ Cette section liste, honnêtement, ce qui est garanti reproductible aujourd'hui 
 | Lignes analysées (EDA) | 16 336 |
 | Confiance HTR moyenne | 0.793 |
 | Lignes signalées pour révision | 36.8% |
-| Tests unitaires | 20 / 20 |
+| Tests unitaires | 22 / 22 |
 | CER pairwise moyen (raw / normalisé / corrigé) | 0.0667 |
 | Tokens couverts par le dictionnaire ancien français | 4.4% |
 | Paires de mots corrigées par les règles | 3725 |
