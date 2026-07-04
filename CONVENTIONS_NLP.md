@@ -4,14 +4,14 @@ Ce document explicite comment l'utilisation du NLP a ete applique au projet, san
 
 ## 1. Validation du data contract HTR
 
-- Schema JSON ajoute: `config/htr_data_contract_schema.json`
+- Schema JSON ajoute: `nlp_pipeline/htr_data_contract_schema.json`
 - Validation schema + controles logiques (taille `char_confidences` == taille `text`):
-  - `src/htr_data_contract.py` -> `validate_contract()`
+  - `nlp_pipeline/htr_data_contract.py` -> `validate_contract()`
 - Commandes:
 
 ```bash
-python src/nlp_cli.py validate --input data/contracts/htr_contract.json
-python src/nlp_cli.py validate --input nlp/output
+python nlp_pipeline/nlp_cli.py validate --input data/contracts/htr_contract.json
+python nlp_pipeline/nlp_cli.py validate --input nlp/output
 ```
 
 ## 2. EDA corpus HTR
@@ -26,13 +26,13 @@ Metriques implementees (cours J1):
 
 Code:
 
-- `src/htr_data_contract.py` -> `compute_eda()`
+- `nlp_pipeline/htr_data_contract.py` -> `compute_eda()`
 
 Commandes:
 
 ```bash
-python src/nlp_cli.py eda --input data/contracts/htr_contract.json --output reports/eda_day1.json
-python src/nlp_cli.py eda --input nlp/output --output reports/eda_nlp_output.json
+python nlp_pipeline/nlp_cli.py eda --input data/contracts/htr_contract.json --output reports/eda_day1.json
+python nlp_pipeline/nlp_cli.py eda --input nlp/output --output reports/eda_nlp_output.json
 ```
 
 ## 3. Strategie de triage confidence / needs_review
@@ -53,13 +53,13 @@ Sorties:
 
 Code:
 
-- `src/htr_data_contract.py` -> `split_review_buckets()`, `export_review_csv()`
+- `nlp_pipeline/htr_data_contract.py` -> `split_review_buckets()`, `export_review_csv()`
 
 Commandes:
 
 ```bash
-python src/nlp_cli.py review-queue --input data/contracts/htr_contract.json
-python src/nlp_cli.py review-queue --input nlp/output
+python nlp_pipeline/nlp_cli.py review-queue --input data/contracts/htr_contract.json
+python nlp_pipeline/nlp_cli.py review-queue --input nlp/output
 ```
 
 ## 4. Normalisation par regles
@@ -75,14 +75,14 @@ Normaliseur en classe independante, regles activables/desactivables (ablation po
 
 Code:
 
-- `src/normalization_rules.py` -> `NormalizerConfig`, `MedievalFrenchNormalizer`
-- table par defaut: `data/abbreviations/medieval_abbreviations.json`
+- `nlp_pipeline/normalization_rules.py` -> `NormalizerConfig`, `MedievalFrenchNormalizer`
+- table par defaut: `nlp_pipeline/medieval_abbreviations.json`
 
 Commandes:
 
 ```bash
-python src/nlp_day1_cli.py normalize --text "Et li cuens prist la d~e"
-python src/nlp_day1_cli.py normalize --csv-input data/input.csv --csv-output data/normalized/output.csv
+python nlp_pipeline/nlp_cli.py normalize --text "Et li cuens prist la d~e"
+python nlp_pipeline/nlp_cli.py normalize --csv-input data/input.csv --csv-output data/normalized/output.csv
 ```
 
 Note : la commande `normalize-contract` (qui applique le normaliseur a un data contract complet, par opposition a `normalize` sur du texte brut/CSV) calcule egalement, depuis cette mise a jour, le **CER pairwise** (`raw` vs `normalized_text`) ligne par ligne et en moyenne, exporte via `--cer-output` — meme principe que pour `correct` (section 6).
@@ -91,12 +91,12 @@ Note : la commande `normalize-contract` (qui applique le normaliseur a un data c
 
 Code CER:
 
-- `src/cer_utils.py` -> `cer()`
+- `nlp_pipeline/cer_utils.py` -> `cer()`
 
 Ablation (avant/apres normalisation):
 
 ```bash
-python src/nlp_day1_cli.py ablation --csv-input data/reference_200.csv --reference-col reference --hypothesis-col text
+python nlp_pipeline/nlp_cli.py ablation --csv-input data/reference_200.csv --reference-col reference --hypothesis-col text
 ```
 
 ## 6. Correction contextuelle guidee par confiance
@@ -112,17 +112,17 @@ Implementation operationnelle pour J1 (mise a jour : MLM active par defaut + rei
 
 Code:
 
-- `src/confidence_correction.py` -> `ConfidenceGuidedCorrector`, `MaskedLMVariantScorer`, `HeuristicVariantScorer`, `LineCorrectionResult`
+- `nlp_pipeline/confidence_correction.py` -> `ConfidenceGuidedCorrector`, `MaskedLMVariantScorer`, `HeuristicVariantScorer`, `LineCorrectionResult`
 
 Commandes:
 
 ```bash
 # MLM actif par defaut (CamemBERT) :
-python src/nlp_cli.py correct --input data/contracts/htr_contract.json --output data/contracts/htr_contract.corrected.json --log-output data/review/correction_log.jsonl --cer-output data/review/correction_cer_report.json
-python src/nlp_cli.py correct --input nlp/output --output-dir nlp/output_corrected --log-output data/review/correction_log.jsonl
+python nlp_pipeline/nlp_cli.py correct --input data/contracts/htr_contract.json --output data/contracts/htr_contract.corrected.json --log-output data/review/correction_log.jsonl --cer-output data/review/correction_cer_report.json
+python nlp_pipeline/nlp_cli.py correct --input nlp/output --output-dir nlp/output_corrected --log-output data/review/correction_log.jsonl
 
 # Scorer heuristique de repli (sans transformers/torch) :
-python src/nlp_cli.py correct --input data/contracts/htr_contract.json --output data/contracts/htr_contract.corrected.json --no-mlm
+python nlp_pipeline/nlp_cli.py correct --input data/contracts/htr_contract.json --output data/contracts/htr_contract.corrected.json --no-mlm
 ```
 
 Note:
@@ -139,12 +139,12 @@ Implementation:
 
 Code:
 
-- `src/htr_data_contract.py` -> `stratified_split_records()`, `seal_test_set()`
+- `nlp_pipeline/htr_data_contract.py` -> `stratified_split_records()`, `seal_test_set()`
 
 Commande:
 
 ```bash
-python src/nlp_day1_cli.py split --records data/documents_metadata.json --output-dir data/splits_nlp
+python nlp_pipeline/nlp_cli.py split --records data/documents_metadata.json --output-dir data/splits_nlp
 ```
 
 ## 8. Tests automatiques
