@@ -1,5 +1,6 @@
 numpy>=1.23
 opencv-python>=4.5
+Pillow>=10.0
 kraken>=4.3
 lxml>=4.9
 tqdm>=4.64

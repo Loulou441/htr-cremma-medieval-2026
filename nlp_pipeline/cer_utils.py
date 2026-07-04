@@ -1,9 +1,12 @@
-"""Utilities for Character Error Rate (CER) evaluation."""
+"""Utilities for Character Error Rate (CER) and Word Error Rate (WER) evaluation."""
 
 from __future__ import annotations
 
+from typing import Sequence
 
-def _levenshtein_distance(a: str, b: str) -> int:
+
+def _levenshtein_distance(a: Sequence, b: Sequence) -> int:
+    """Generic Levenshtein distance, works on strings (chars) or lists (tokens)."""
     if a == b:
         return 0
     if not a:
@@ -29,6 +32,18 @@ def cer(reference: str, hypothesis: str) -> float:
     """Compute CER as edit_distance / max(1, len(reference))."""
     denom = max(1, len(reference))
     return _levenshtein_distance(reference, hypothesis) / denom
+
+
+def wer(reference: str, hypothesis: str) -> float:
+    """Compute WER as word-level edit_distance / max(1, number of words in reference).
+
+    Tokenization is a simple whitespace split, consistent with the rest of the
+    NLP pipeline (cf. cer_utils.cer for the character-level equivalent).
+    """
+    ref_tokens = reference.split()
+    hyp_tokens = hypothesis.split()
+    denom = max(1, len(ref_tokens))
+    return _levenshtein_distance(ref_tokens, hyp_tokens) / denom
 
 
 def average_pairwise_cer(texts: list[str]) -> float:

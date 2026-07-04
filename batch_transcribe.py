@@ -1,18 +1,18 @@
+import hashlib
+import json
 import os
 import re
+import statistics
 import sys
+from datetime import datetime
 from pathlib import Path
 
-# On s'assure que le répertoire courant est dans le path pour importer app.py
-sys.path.append(os.getcwd())
-
 try:
-    import app
     from kraken import blla, rpred
     from PIL import Image
 except ImportError as e:
     print(f"❌ Erreur d'importation : {e}")
-    print("Assurez-vous d'avoir installé kraken, streamlit, pillow, requests et d'exécuter le script dans le dossier de app.py.")
+    print("Assurez-vous d'avoir installé kraken et pillow (voir requirements.txt).")
     sys.exit(1)
 
 # Configuration
@@ -20,6 +20,83 @@ TXT_FILE = "resources/manuscrits_xiii_siecle.txt"
 OUTPUT_DIR = Path("data/predictions")
 DOWNLOAD_DIR = Path("data/downloads")
 MODEL_PATH = Path("models/exp3opt_finetune_20260615_1849.safetensors")
+
+
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def build_data_contract(
+    image_bytes: bytes,
+    image_filename: str,
+    preds: list,
+    model_name: str,
+    confidence_threshold: float = 0.9,
+) -> dict:
+    """Build an HTR data contract JSON from Kraken predictions.
+
+    Rapatrié depuis l'ancien app.py (supprimé du dépôt) pour que ce script de
+    transcription batch reste autonome : la structure produite doit rester
+    strictement conforme à nlp_pipeline/htr_data_contract_schema.json.
+    """
+    doc_id = Path(image_filename).stem + "_" + datetime.now().strftime("%Y%m%d_%H%M%S")
+    lines = []
+    for i, p in enumerate(preds, start=1):
+        text = p.prediction or ""
+        char_confs = list(p.confidences) if p.confidences else []
+        confidence = sum(char_confs) / len(char_confs) if char_confs else 0.0
+
+        char_std = statistics.pstdev(char_confs) if len(char_confs) > 1 else 0.0
+        needs_review = confidence < confidence_threshold or char_std > 0.2
+
+        polygon = []
+        if hasattr(p, "cuts") and p.cuts:
+            try:
+                polygon = [[int(x), int(y)] for x, y in p.cuts]
+            except Exception:
+                polygon = []
+
+        lines.append({
+            "line_id": f"{doc_id}_l{i:03d}",
+            "text": text,
+            "confidence": round(confidence, 4),
+            "char_confidences": [round(c, 4) for c in char_confs],
+            "candidates": None,
+            "needs_review": needs_review,
+            "polygon": polygon,
+            "reading_order": i,
+        })
+
+    return {
+        "document_id": doc_id,
+        "metadata": {
+            "source": image_filename,
+            "century_estimate": "XIII",
+            "document_type": "unknown",
+            "scan_quality": "unknown",
+            "sha256": _sha256_bytes(image_bytes),
+            "model": model_name,
+            "produced_at": datetime.now().isoformat(timespec="seconds"),
+        },
+        "pages": [
+            {
+                "page_id": "p001",
+                "image_path": image_filename,
+                "lines": lines,
+            }
+        ],
+    }
+
+
+def save_data_contract(contract: dict) -> Path:
+    """Save data contract JSON to OUTPUT_DIR and return the path."""
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = OUTPUT_DIR / f"{contract['document_id']}.json"
+    out_path.write_text(
+        json.dumps(contract, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return out_path
 
 def extract_gallica_ark(url):
     """Extrait l'identifiant ARK de Gallica à partir d'une URL."""
@@ -102,7 +179,7 @@ def process_batch():
             print(f"  📄 {img_path.name}...", end="", flush=True)
 
             try:
-                # Ouverture et conversion en niveaux de gris (Mode L) requis par app.py
+                # Ouverture et conversion en niveaux de gris (Mode L), requis par le modèle Kraken
                 image = Image.open(img_path).convert("L")
 
                 # Étape 1 : Segmentation native de Kraken (BLLA)
@@ -115,9 +192,9 @@ def process_batch():
                 # Étape 2 : Transcription par reconnaissance
                 preds = list(rpred.rpred(net, image, segmentation))
 
-                # Étape 3 : Construction du Data Contract (Fonction de app.py)
+                # Étape 3 : Construction du Data Contract
                 image_bytes = img_path.read_bytes()
-                contract = app.build_data_contract(
+                contract = build_data_contract(
                     image_bytes=image_bytes,
                     image_filename=img_path.name,
                     preds=preds,
@@ -128,7 +205,7 @@ def process_batch():
                 contract["metadata"]["document_type"] = ms["name"]
 
                 # Étape 4 : Sauvegarde automatique du JSON final
-                out_path = app.save_data_contract(contract)
+                out_path = save_data_contract(contract)
                 print(f" Sauvegardée -> `{out_path}`")
 
             except Exception as e:
