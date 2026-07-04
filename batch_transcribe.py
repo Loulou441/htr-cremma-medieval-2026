@@ -16,7 +16,7 @@ except ImportError as e:
     sys.exit(1)
 
 # Configuration
-TXT_FILE = "Manuscrits XIII siecle.txt"
+TXT_FILE = "resources/manuscrits_xiii_siecle.txt"
 OUTPUT_DIR = Path("data/predictions")
 DOWNLOAD_DIR = Path("data/downloads")
 MODEL_PATH = Path("models/exp3opt_finetune_20260615_1849.safetensors")
