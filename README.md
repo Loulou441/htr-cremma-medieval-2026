@@ -265,18 +265,30 @@ Sur le corpus actuel, `candidates` est **`null` sur la quasi-totalité des ligne
 Deux niveaux de détection, complémentaires, tous deux implémentés dans `normalization_rules.py` :
 
 - **`detect-normalization`** : repère les marqueurs typographiques d'abréviation résiduels (`~`, `⁊`, `ꝑ`...) et propose des expansions automatiques pour les tokens non encore couverts par la table d'abréviations.
-- **`lexical-check`** : vérifie si chaque token (normalisé) existe dans un dictionnaire ancien français fourni via `--dictionary` (format `mot → {wiktionary_en, cltk_fr}`, ~55k entrées sur le run de référence). Les tokens absents sont des candidats à une vraie erreur lexicale — mot mal transcrit, abréviation non résolue, ou terme hors corpus.
+- **`lexical-check`** : vérifie si chaque token (normalisé) existe dans un dictionnaire ancien français fourni via `--dictionary` (format `mot → {wiktionary_en, cltk_fr}`). Les tokens absents sont des candidats à une vraie erreur lexicale — mot mal transcrit, abréviation non résolue, ou terme hors corpus.
 
-> Le dictionnaire lui-même (`dictionnaire_ancien_francais.json`) n'est **pas versionné dans cette branche** (fichier de données, ignoré par `.gitignore`) et le script qui l'a construit n'y figure pas non plus — `lexical-check` s'attend simplement à recevoir un chemin valide vers ce JSON via `--dictionary`. Voir [section 14](#14-reproductibilité) pour ce que ça implique en pratique.
+Le dictionnaire (`resources/dictionnaire_ancien_francais.json`) est **versionné dans cette branche** — **172 734 entrées**, construites à partir de deux sources réelles :
+- *Old French-English Wiktionary dictionary* (StarDict, [Vuizur/Wiktionary-Dictionaries](https://github.com/Vuizur/Wiktionary-Dictionaries)) — 5691 entrées + 122 667 variantes orthographiques médiévales rattachées via son fichier `.syn` ;
+- *Lexique de l'ancien français* (Godefroy, [cltk/french_lexicon_cltk](https://github.com/cltk/french_lexicon_cltk)) — 53 145 entrées en français moderne.
+
+`nlp_cli.py` pointe vers ce fichier par défaut (`DEFAULT_DICTIONARY`) — `--dictionary` reste disponible pour en fournir un autre.
 
 ```bash
 python nlp_pipeline/nlp_cli.py detect-normalization --output-dir data/nlp_output --top-n 50
-python nlp_pipeline/nlp_cli.py lexical-check --dictionary data/dictionary/dictionnaire_ancien_francais.json --output-dir data/nlp_output --top-n 30
+python nlp_pipeline/nlp_cli.py lexical-check --output-dir data/nlp_output --top-n 30
 ```
 
-Sur le corpus complet, seuls **4.4% des tokens** sont couverts par le dictionnaire — un taux bas qui reflète une limite de la ressource (les mots-outils très fréquents comme `est`, `ce`, `vous` n'y sont pas indexés), pas un échec de la normalisation : les marqueurs typographiques bruts disparaissent bien du classement après normalisation.
+### Couverture mesurée — deux résultats, pas encore de mesure sur le corpus complet
+
+| Corpus testé | Couverture | Contexte |
+|---|---|---|
+| Corpus de démonstration synthétique (propre, 14 lignes) | **66.7%** | Texte fabriqué mais grammaticalement correct une fois normalisé |
+| Page réelle Gallica (*Roman de Troie*, f5, 511 tokens) | **27.2%** | Transcription réelle mais dégradée (confiance moyenne 0.62) — la moitié des tokens inconnus les plus fréquents sont des fragments d'1-2 lettres, pas de vrais mots |
+
+Le chiffre de **4.4%** cité dans le run de référence du 18 juin (section 15) provient d'un dictionnaire différent (~55k entrées, jamais versionné, origine non documentée) appliqué au corpus complet de 129 documents. Ce nouveau dictionnaire n'a **pas encore été passé sur ce même corpus de 129 documents** (non disponible dans cet environnement) — les deux chiffres ci-dessus ne sont donc pas directement comparables au 4.4% historique. Ce qu'ils montrent : la couverture dépend fortement de la qualité de la transcription source, pas seulement de la taille du dictionnaire.
 
 ---
+
 
 ## 9. Évaluation : CER pairwise à chaque étape
 
@@ -361,13 +373,16 @@ Arborescence réellement versionnée sur `nlp-pipeline-completed` :
 ├── docs/
 │   ├── CONVENTIONS_NLP.md         # conventions détaillées (normalisation, schéma BIO, etc.)
 │   ├── PRESENTATION_NLP.md        # support de présentation
-│   └── RAPPORT_NLP_2026-06-18.md  # rapport détaillé daté (chronologie, résultats mesurés)
+│   ├── RAPPORT_NLP_2026-06-18.md  # rapport détaillé daté (chronologie, résultats mesurés)
+│   ├── RAPPORT_NLP_2026_07_04.md  # rapport de démonstration (corpus synthétique, scorer heuristique)
+│   └── RAPPORT_NLP_2026_07_05.md  # rapport sur un vrai document Gallica (CamemBERT MLM réel)
 ├── notebooks/
 │   ├── kaggle_eval_test.ipynb      # évaluation CER d'un modèle HTR (Volet HTR, sans lien avec nlp_cli.py)
 │   ├── nlp_cli_kaggle.ipynb        # pipeline NLP bout-en-bout sur un document, environnement Kaggle + S3
 │   └── nlp_cli_local.ipynb        # même démo, en local, sans clone Git ni sync S3
 ├── resources/
-│   └── manuscrits_xiii_siecle.txt # liste source des manuscrits Gallica/BnF
+│   ├── manuscrits_xiii_siecle.txt         # liste source des manuscrits Gallica/BnF
+│   └── dictionnaire_ancien_francais.json  # dictionnaire ancien français, 172 734 entrées (section 8)
 └── nlp_pipeline/
     ├── htr_data_contract.py
     ├── normalization_rules.py
@@ -400,9 +415,10 @@ data/
 ├── nlp_output_corrected/          # après correct
 ├── review/                        # CSV, JSON, logs, rapports CER
 ├── splits_nlp/                    # train/val/test + scellement
-├── downloads/                     # pages Gallica téléchargées par batch_transcribe.py
-└── dictionary/                    # dictionnaire ancien français (non fourni dans le repo)
+└── downloads/                     # pages Gallica téléchargées par batch_transcribe.py
 ```
+
+Le dictionnaire ancien français n'est **plus** dans cette liste : il est désormais versionné (`resources/dictionnaire_ancien_francais.json`, voir section 8), et `nlp_cli.py` l'utilise comme valeur par défaut de `--dictionary`.
 
 > **Point d'attention `.gitignore`** : les commandes CLI écrivent leurs sorties par défaut sous `data/...` et leur journal d'exécution dans `data/review/nlp_cli_run_log.jsonl` — chemins **relatifs au répertoire courant**, pas à l'emplacement des scripts. Lancer une commande depuis `nlp_pipeline/` plutôt que depuis la racine du dépôt créerait donc un `nlp_pipeline/data/` parasite (déjà vu pendant la vérification de cette branche). Comme `.gitignore` ignore `data` sans égard à la profondeur, ce dossier resterait bien ignoré par git où qu'il apparaisse — mais toujours lancer les commandes `nlp_cli.py` depuis la racine du dépôt pour éviter la confusion.
 
@@ -415,15 +431,15 @@ pip install -r requirements.txt --break-system-packages
 pytest nlp_pipeline/tests/ -q
 ```
 
-**22 tests**, répartis sur 6 fichiers dans `nlp_pipeline/tests/` :
+**23 tests**, répartis sur 6 fichiers dans `nlp_pipeline/tests/` :
 - `test_cer_utils.py` (4) — CER, WER, cohérence des deux conventions de calcul.
 - `test_htr_data_contract.py` (4) — validation de schéma, EDA, triage.
 - `test_nlp_cli.py` (1) — CER pairwise moyen.
-- `test_nlp_cli_defaults.py` (2) — les chemins par défaut du CLI (`DEFAULT_SCHEMA`, `DEFAULT_ABBR`) pointent vers des fichiers qui existent réellement sur le disque. Ajouté après un bug réel : le déplacement du schéma et de la table d'abréviations vers `json_files/` avait cassé ces chemins par défaut sans qu'aucun test ne le détecte.
+- `test_nlp_cli_defaults.py` (3) — les chemins par défaut du CLI (`DEFAULT_SCHEMA`, `DEFAULT_ABBR`, `DEFAULT_DICTIONARY`) pointent vers des fichiers qui existent réellement sur le disque. Ajouté après deux bugs réels successifs : le déplacement du schéma et de la table d'abréviations vers `json_files/`, puis l'introduction de `DEFAULT_DICTIONARY` pointant vers `nlp_pipeline/resources/` alors que le dictionnaire vit à la racine du dépôt (`resources/`) — les deux avaient cassé leur commande respective (`validate`/`correct`, puis `lexical-check`) sans qu'aucun test ne le détecte.
 - `test_normalization_rules.py` (8) — règles de normalisation, détection d'abréviations, erreurs lexicales.
 - `test_normalization_cer_regression.py` (3) — non-régression du CER sur un échantillon de référence après normalisation (moyenne + ligne par ligne).
 
-Ces 22 tests sont **entièrement autonomes** : aucun n'a besoin des données du corpus réel (`data/`, non versionnées) — ils tournent sur des exemples codés en dur, sur les fichiers réels de `json_files/`, ou dans des répertoires temporaires (`tmp_path`). C'est ce qui garantit qu'ils passent de manière identique sur n'importe quelle machine, y compris sans accès aux 129 manuscrits transcrits.
+Ces 23 tests sont **entièrement autonomes** : aucun n'a besoin des données du corpus réel (`data/`, non versionnées) — ils tournent sur des exemples codés en dur, sur les fichiers réels de `json_files/`/`resources/`, ou dans des répertoires temporaires (`tmp_path`). C'est ce qui garantit qu'ils passent de manière identique sur n'importe quelle machine, y compris sans accès aux 129 manuscrits transcrits.
 
 Dépendances NLP ajoutées : `jsonschema>=4.21`, `pytest>=8.0`, `transformers>=4.0`, `sentencepiece>=0.1.0` (CamemBERT MLM), `Pillow>=10.0` (requis par `evaluate_model.py`).
 
@@ -457,7 +473,7 @@ Cette section liste, honnêtement, ce qui est garanti reproductible aujourd'hui 
 - **Version de Python non documentée** : aucun `.python-version` ni `requires-python` dans le dépôt. Ce document a été vérifié avec Python 3.12 ; à préciser explicitement pour que l'environnement soit reconstructible à l'identique.
 - **Modèle CamemBERT non épinglé à une révision** : `almanach/camembert-base` est référencé par son seul nom de dépôt Hugging Face, sans `revision=<commit_sha>`. Le poids du modèle de base a très peu de chances de changer, mais épingler une révision précise (`from_pretrained(model_name, revision="...")`) supprimerait ce doute pour un rendu qui doit rester reproductible à long terme.
 - **`--mlm-device auto` peut varier d'une machine à l'autre** : sur une machine avec GPU, `auto` choisira `cuda` ; sur une machine sans GPU, `cpu`. Les résultats du MLM sont déterministes *sur un device donné*, mais de très légers écarts de calcul flottant peuvent apparaître entre CPU et GPU. Pour comparer des runs bit-à-bit, fixer explicitement `--mlm-device cpu` (ou `cuda`) plutôt que `auto`.
-- **Reproductibilité des résultats du corpus complet (section 15) ≠ reproductibilité du code** : les 129 documents, le dictionnaire ancien français et l'échantillon `reference_200.csv` ne sont **pas versionnés** dans cette branche (`.gitignore` exclut `data/`). Cloner ce dépôt et lancer `pytest` reproduit fidèlement le comportement du code (22/22 tests), mais **ne reproduit pas** à lui seul les chiffres de la section 15 — il faut disposer séparément des données sources (sortie HTR, dictionnaire).
+- **Reproductibilité des résultats du corpus complet (section 15) ≠ reproductibilité du code** : les 129 documents et l'échantillon `reference_200.csv` ne sont **pas versionnés** dans cette branche (`.gitignore` exclut `data/`) — le dictionnaire ancien français, lui, l'est désormais (`resources/dictionnaire_ancien_francais.json`, section 8). Cloner ce dépôt et lancer `pytest` reproduit fidèlement le comportement du code (23/23 tests), mais **ne reproduit pas** à lui seul les chiffres de la section 15 — il faut disposer séparément des données sources (sortie HTR sur le corpus complet).
 - **`stratified_split_records()` modifie l'état global de `random`** : elle appelle `random.seed(seed)` sur le module `random` global plutôt que d'utiliser une instance locale (`random.Random(seed)`). Sans conséquence pour un appel CLI isolé (process à usage unique), mais à corriger si cette fonction est un jour appelée plusieurs fois dans un même processus Python (notebook, pipeline orchestré).
 - **Toujours lancer `nlp_cli.py` depuis la racine du dépôt** : les sorties par défaut (`data/review/...`) sont relatives au répertoire courant, pas à l'emplacement du script — voir l'encadré en [section 12](#12-structure-des-fichiers-de-la-branche).
 
@@ -473,9 +489,9 @@ Cette section liste, honnêtement, ce qui est garanti reproductible aujourd'hui 
 | Lignes analysées (EDA) | 16 336 |
 | Confiance HTR moyenne | 0.793 |
 | Lignes signalées pour révision | 36.8% |
-| Tests unitaires | 22 / 22 |
+| Tests unitaires (suite actuelle, pas figée au 18 juin) | 23 / 23 |
 | CER pairwise moyen (raw / normalisé / corrigé) | 0.0667 |
-| Tokens couverts par le dictionnaire ancien français | 4.4% |
+| Tokens couverts par le dictionnaire ancien français (dictionnaire de l'époque, ~55k entrées — voir [section 8](#8-détection-lexicale)) | 4.4% |
 | Paires de mots corrigées par les règles | 3725 |
 
 > Voir [section 14](#14-reproductibilité) : ces chiffres proviennent du run du 18 juin sur des données non versionnées dans ce dépôt ; ils ne sont pas regénérables par un simple `git clone` + `pytest`.
@@ -484,7 +500,7 @@ Cette section liste, honnêtement, ce qui est garanti reproductible aujourd'hui 
 
 ## 16. Limites connues
 
-- **Détection lexicale (4.4% de couverture)** : limite de la ressource externe (mots-outils absents), pas un échec de la normalisation.
+- **Détection lexicale** : le dictionnaire de 172 734 entrées (section 8) n'a été mesuré que sur un corpus synthétique propre (66.7%) et une page réelle dégradée (27.2%) — pas encore sur le corpus complet de 129 documents, faute d'y avoir accès dans cet environnement. Le chiffre historique de 4.4% (section 15) utilisait un dictionnaire différent et plus petit ; il n'est pas comparable directement.
 - **Correction guidée par confiance/MLM** : le scorer CamemBERT est actif par défaut, mais `candidates` est `null` sur la quasi-totalité des données réelles → 0 correction appliquée sur ce run. Le CER pairwise de l'étape `correct` est donc proche de 0 (texte inchangé), ce qui est attendu.
 - **Réinjection `needs_review`** : pour la même raison, son effet n'est pas encore observable sur le corpus actuel.
 - **Règle u/v** : exclut volontairement `u+i` pour éviter les faux positifs, empêchant `deuient→devient` — compromis documenté et accepté.
