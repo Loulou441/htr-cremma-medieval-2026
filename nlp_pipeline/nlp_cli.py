@@ -31,7 +31,7 @@ from normalization_rules import (
 
 DEFAULT_SCHEMA = str(Path(__file__).parent / "json_files" / "htr_data_contract_schema.json")
 DEFAULT_ABBR = str(Path(__file__).parent / "json_files" / "medieval_abbreviations.json")
-DEFAULT_DICTIONARY = str(Path(__file__).parent / "resources" / "dictionnaire_ancien_francais.json")
+DEFAULT_DICTIONARY = str(Path(__file__).parent.parent / "resources" / "dictionnaire_ancien_francais.json")
 RUN_LOG_PATH = str(Path(__file__).parent / "data" / "review" / "nlp_cli_run_log.jsonl")
 
 
