@@ -200,15 +200,25 @@ Toutes les étapes sont exposées via un CLI unifié :
 | Lignes signalées pour révision | 36.8% |
 | Paires de mots corrigées par les règles de normalisation | 3725 |
 | CER pairwise moyen (raw / normalisé / corrigé) | 0.0667 |
-| Tokens couverts par le dictionnaire ancien français | 4.4% |
-| Tests unitaires | 22 / 22 |
+| Tokens couverts par le dictionnaire ancien français (dictionnaire de l'époque) | 4.4% |
+| Tests unitaires (suite actuelle) | 23 / 23 |
+
+**Depuis ce run** : un vrai dictionnaire ancien français a été construit et versionné
+(`resources/dictionnaire_ancien_francais.json`, 172 734 entrées — Wiktionary +
+lexique Godefroy/CLTK), et le pipeline a été validé de bout en bout sur un vrai
+document Gallica (*Le Roman de Troie*, BnF fr. 783 — voir `docs/RAPPORT_NLP_2026_07_05.md`
+sur la branche NLP), pas seulement sur le corpus synthétique. Ce nouveau dictionnaire
+donne 66.7% de couverture sur un corpus synthétique propre et 27.2% sur cette page
+réelle (dégradée) — deux chiffres non comparables au 4.4% ci-dessus, mesuré avec un
+dictionnaire différent sur le corpus complet.
 
 ### Reproductibilité
 
 Points déjà solides : seed fixée (`--seed 67`) pour le split stratifié, test set
 scellé et vérifiable par hash SHA-256, correction MLM déterministe (modèle en mode
-évaluation par construction, pas d'échantillonnage), 22 tests unitaires entièrement
-autonomes (aucune dépendance au corpus réel).
+évaluation par construction, pas d'échantillonnage), 23 tests unitaires entièrement
+autonomes (aucune dépendance au corpus réel), dictionnaire ancien français désormais
+versionné (auparavant une donnée externe non fournie).
 
 Points encore ouverts : dépendances non verrouillées (bornes basses uniquement dans
 `requirements.txt`), version de Python non documentée formellement, modèle CamemBERT
@@ -217,8 +227,8 @@ non épinglé à une révision Hugging Face précise. Détail complet dans la se
 
 ### Limitations connues (Volet 2)
 
-- **Détection lexicale (4.4% de couverture)** : limite de la ressource externe (mots-outils absents du dictionnaire), pas un échec de la normalisation.
-- **Correction guidée par confiance** : `candidates` est `null` sur la quasi-totalité des lignes réelles → le scorer CamemBERT, bien qu'actif par défaut, n'a rien à arbitrer sur ce run (0 correction). Le mécanisme est fonctionnel et a été vérifié sur données synthétiques.
+- **Détection lexicale** : le nouveau dictionnaire (172 734 entrées) n'a pas encore été mesuré sur le corpus complet de 129 documents — seulement sur un corpus synthétique et une page réelle isolée (voir tableau ci-dessus).
+- **Correction guidée par confiance** : `candidates` est `null` sur la quasi-totalité des lignes réelles → le scorer CamemBERT, bien qu'actif par défaut, n'a rien à arbitrer sur ce run (0 correction). Le mécanisme est fonctionnel, vérifié sur données synthétiques **et** sur un vrai document Gallica.
 - **Règle u/v** : compromis assumé qui empêche la correction de `deuient→devient` pour éviter davantage de faux positifs ailleurs.
 
 ---
@@ -231,7 +241,7 @@ non épinglé à une révision Hugging Face précise. Détail complet dans la se
 | Lignes | 22 858 (brut), 18 769 (filtré train) | 16 336 |
 | Métrique clé | CER 26.3% (objectif < 15%) | CER pairwise 0.0667 (relatif, pas de vérité terrain) |
 | Statut | Exp 3 (grayscale) en cours pour lever le plafond à 74% | Normalisation + triage opérationnels ; NER/POS/graphe/TEI non démarrés |
-| Tests automatisés | `pytest tests/` (Volet HTR) | `pytest nlp_pipeline/tests/ -q` — 22/22 |
+| Tests automatisés | `pytest tests/` (Volet HTR) | `pytest nlp_pipeline/tests/ -q` — 23/23 |
 
 ---
 
@@ -239,7 +249,7 @@ non épinglé à une révision Hugging Face précise. Détail complet dans la se
 
 - **Aucun des deux volets ne dispose d'une vérité terrain complète** sur son corpus de production (Volet 1 : set de test scellé mais évaluation détaillée par script encore *à compléter* ; Volet 2 : évaluation relative uniquement). Les deux README détaillés documentent précisément ce qui est mesuré et comment.
 - **Reproductibilité des dépendances** : les deux volets utilisent des `requirements.txt` avec bornes basses uniquement (`>=`), sans lockfile — un point d'attention commun avant tout rendu final ou publication.
-- **Données lourdes non versionnées** (corpus, modèles, Arrow, dictionnaire ancien français) : gérées via S3 (Volet 1) et exclues par `.gitignore` (Volet 2) — cloner le dépôt reproduit le code et les tests, pas les données de production.
+- **Données lourdes non versionnées** (corpus, modèles, Arrow) : gérées via S3 (Volet 1) et exclues par `.gitignore` (Volet 2) — cloner le dépôt reproduit le code et les tests, pas les données de production. Exception notable : le dictionnaire ancien français du Volet 2 (172 734 entrées) est lui désormais versionné.
 
 ---
 
