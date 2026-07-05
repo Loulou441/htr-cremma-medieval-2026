@@ -205,3 +205,121 @@ pytest nlp_pipeline/tests/ -q
 - `pytest>=8.0`
 - `transformers>=4.0`, `sentencepiece>=0.1.0` (CamemBERT MLM, section 6)
 - `Pillow>=10.0` (requis par `evaluate_model.py`)
+
+## 11. Pourquoi ces choix (rationale)
+
+Les sections precedentes documentent *quoi* a ete implemente et *ou*. Cette section
+documente *pourquoi*, pour les decisions qui ne sont pas evidentes a la lecture du
+code seul.
+
+### Pourquoi des regles deterministes avant tout traitement statistique/IA ?
+
+La consigne du projet donne explicitement cet ordre de priorite : "la normalisation
+est la brique la plus facile a mettre en oeuvre et celle qui apporte le plus de gain
+en CER immediat [...] Commencez par les regles deterministes [...] avant la
+correction guidee par confiance". Trois raisons pratiques a ce choix :
+
+1. **Cout/benefice** : les regles (NFC, u/v, i/j, tilde, abreviations) ne demandent
+   aucune donnee d'entrainement ni modele externe, et corrigent a elles seules 3725
+   paires de mots distinctes sur le corpus complet (cf. README section 6) — un gain
+   immediat et gratuit avant meme de brancher un modele de langue.
+2. **Explicabilite** : une regle ratee est facile a diagnostiquer et corriger (un
+   `if`/`else` de plus) ; une erreur de scoring MLM est beaucoup plus opaque a
+   deboguer.
+3. **Le traitement statistique (CamemBERT MLM) n'a de sens que sur ce qui reste
+   ambigu apres les regles** : appliquer les regles d'abord reduit le nombre de
+   positions que le correcteur guide par confiance a effectivement besoin
+   d'arbitrer.
+
+### Pourquoi NFC en premiere etape ?
+
+Les manuscrits medievaux transcrits par HTR melangent des caracteres Unicode
+combines et precomposes pour un meme signe diacritique (ex. un `o` suivi d'un tilde
+combinant U+0303, versus un `õ` precompose). Sans normalisation NFC prealable, les
+regles suivantes (u/v, i/j, expansion du tilde) devraient chacune gerer les deux
+representations separement, ce qui double leur complexite et leur surface de bug
+pour aucun gain. Faire NFC en premier garantit qu'une seule forme canonique arrive
+aux regles suivantes.
+
+### Pourquoi exclure `qu`/`gu` et `u+i` de la regle u/v ?
+
+La regle u/v resout les variantes graphiques medievales par contexte (`auant` →
+`avant`, `cheualier` → `chevalier`). Mais dans les digrammes `qu`/`gu` (`que`,
+`qui`, `guerre`) et dans `u+i` (`lui`), le `u` est deja vocalique en francais moderne
+— le convertir en `v` produirait des formes fausses (`qve`, `gverre`, `lvi`).
+**Compromis assume** : cette exception empeche aussi de corriger `deuient` en
+`devient` (un vrai cas de `u` consonantique suivi de `i`), mais les faux positifs
+qu'elle evite (sur `que`, `qui`, `guerre`, `lui`, tres frequents) sont bien plus
+nombreux que ce faux negatif ponctuel. Verifie et documente empiriquement dans
+`test_uv_rule_keeps_qu_gu_and_ui_digraphs` (`tests/test_normalization_rules.py`).
+
+### Pourquoi le seuil de confiance a 0.7 pour la correction guidee ?
+
+Le seuil `--threshold 0.7` (par defaut dans `correct`) determine a partir de quelle
+confiance caractere une position est consideree assez incertaine pour justifier
+l'arbitrage d'un modele de langue. Il est volontairement different des seuils du
+triage `review-queue` (0.60 exclusion / 0.90 ingestion directe, section 3) : ces
+derniers decident si une **ligne entiere** merite une revue humaine, alors que 0.7
+decide, **caractere par caractere**, s'il vaut la peine de solliciter CamemBERT.
+Un seuil plus bas (ex. 0.5) laisserait passer des positions deja suffisamment
+fiables sans les arbitrer ; un seuil plus haut (ex. 0.9) solliciterait le modele sur
+des positions presque certaines, sans gain attendu et pour un cout de calcul inutile.
+0.7 se situe dans l'intervalle de la strategie de triage (0.60-0.90) ou la confiance
+est ambigue mais pas franchement mauvaise — la zone ou un arbitrage a le plus de
+chances d'apporter un vrai gain.
+
+### Pourquoi CamemBERT MLM plutot qu'un scorer heuristique par defaut ?
+
+Le scorer heuristique (`HeuristicVariantScorer`) ne juge une variante que sur des
+criteres de surface (le caractere est-il alphabetique ? une voyelle ? entoure de
+lettres ?) — il ne "comprend" pas le mot ni la phrase. CamemBERT en mode *Masked
+Language Model* evalue au contraire la probabilite de chaque candidat dans son
+contexte linguistique reel, ce qui est strictement plus informatif des lors qu'un
+GPU (ou meme un CPU raisonnable) est disponible. Le scorer heuristique reste
+neanmoins le repli par defaut recommande (`--no-mlm`) pour les environnements sans
+`transformers`/`torch installes, ou sans connectivite vers Hugging Face.
+
+### Pourquoi le schema BIO n'est pas encore documente ici
+
+Le schema d'annotation BIO (Beginning/Inside/Outside, standard pour la
+reconnaissance d'entites nommees token par token) concerne la phase NER du plan
+"after" du projet (README section 17, "Prochaines etapes") — **cette phase n'a pas
+encore demarre**. Aucun code de ce depot ne produit ou ne consomme d'annotations BIO
+a ce jour ; documenter un choix de schema maintenant serait premature et risquerait
+de ne pas correspondre au modele de base finalement retenu (voir README section 17 :
+`magistermilitum/roberta-multilingual-medieval-ner` ou equivalent CREMMA/CATMuS).
+Cette section sera completee avec la justification du schema BIO (et de tout
+regroupement de classes, ex. ajout d'une classe `TITLE` a cote de `PER`/`LOC`/`ORG`
+comme suggere par la consigne du projet) au moment ou la phase NER demarrera
+reellement, plutot que d'anticiper un choix non encore teste.
+
+### Pourquoi une evaluation relative (CER pairwise) plutot qu'absolue ?
+
+Aucune verite terrain complete n'existe pour les manuscrits transcrits (129
+documents, section 1) — impossible de calculer un CER absolu par comparaison a une
+transcription de reference humaine sur l'ensemble du corpus. La mesure retenue
+(CER pairwise entre variantes successives d'une meme ligne : brute, normalisee,
+corrigee) donne une courbe d'evolution sans necessiter cette verite terrain,
+au prix de ne mesurer qu'un changement relatif et non un gain de qualite absolu.
+Sur l'echantillon annote manuellement (`ablation`, section 5), un vrai CER
+avant/apres reste calculable et vient completer cette mesure relative.
+
+### Pourquoi stratifier le split sur `(century_estimate, document_type)` ?
+
+Le corpus melange plusieurs siecles et plusieurs types de documents (roman,
+chronique...). Un split aleatoire simple risquerait de concentrer par hasard un
+siecle ou un type de document dans le train et un autre dans le test, biaisant
+l'evaluation. Stratifier sur ces deux dimensions garantit que chaque strate est
+representee proportionnellement dans train/val/test — condition necessaire pour
+qu'une performance mesuree sur le test set soit representative du corpus dans son
+ensemble, et pas seulement d'une de ses sous-populations.
+
+### Pourquoi sceller le test set par SHA-256 ?
+
+Le principe (consigne du projet, section 2) est de ne plus regarder le test set une
+fois constitue, pour que les decisions d'architecture/hyperparametres restent
+prises uniquement sur le jeu de validation. Le hash SHA-256 rend cette regle
+verifiable plutot que declarative : si le contenu de `test_sealed.json` est modifie
+(intentionnellement ou par erreur) apres scellement, le hash recalcule ne correspond
+plus a `test_set.sha256`, et la fuite potentielle de donnees de test devient
+detectable au lieu de reposer sur la seule discipline de l'equipe.
