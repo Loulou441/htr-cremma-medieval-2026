@@ -19,7 +19,7 @@ except ImportError as e:
 TXT_FILE = "resources/manuscrits_xiii_siecle.txt"
 OUTPUT_DIR = Path("data/predictions")
 DOWNLOAD_DIR = Path("data/downloads")
-MODEL_PATH = Path("models/exp3opt_finetune_20260615_1849.safetensors")
+MODEL_PATH = Path("models/exp2_binarise_20260613.safetensors")
 
 
 def _sha256_bytes(data: bytes) -> str:
@@ -154,7 +154,7 @@ def process_batch():
 
     print(f"📚 {len(unique_manuscripts)} manuscrits uniques trouvés. Lancement du traitement par lot...")
 
-    # 2. Chargement du modèle fine-tuné local (exp3opt_finetune_20260615_1849)
+    # 2. Chargement du modèle fine-tuné local (exp2_binarise_20260613.safetensors)
     if not MODEL_PATH.exists():
         print(f"❌ Modèle introuvable : {MODEL_PATH}")
         return
